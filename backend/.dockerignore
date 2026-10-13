@@ -1,0 +1,10 @@
+# Keep the build context small and free of local secrets; the Dockerfile copies only what it needs.
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+tests/
+.env
+.env.*
+Dockerfile
+.dockerignore

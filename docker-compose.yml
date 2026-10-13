@@ -1,4 +1,6 @@
-# Only the database for now; the api and web services will be added later.
+# Full LeadFlow stack: Postgres + FastAPI + Next.js.
+#   docker compose up --build      -> app on http://localhost:3000, API on http://localhost:8000
+# Works without any .env file; every ${VAR:-default} below can be overridden in ./.env (see .env.example).
 services:
   db:
     image: postgres:16-alpine
@@ -15,6 +17,39 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build: ./backend
+    environment:
+      # "db" is the Postgres service on the compose network (container port 5432).
+      DATABASE_URL: postgresql+psycopg://leadflow:leadflow@db:5432/leadflow
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
+      SEED_TIMEZONE: ${SEED_TIMEZONE:-Asia/Kolkata}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Probe command comes from the image's HEALTHCHECK (a Python one-liner; slim images have no curl).
+    healthcheck:
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Inlined into the browser bundle at build time. The BROWSER calls the API,
+        # so this is localhost (the published port), not the "api" service name.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:

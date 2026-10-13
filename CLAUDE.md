@@ -25,7 +25,7 @@ LeadFlow is a single-screen CRM (a lightweight lead management tool). A sales re
 - **Frontend** (`/frontend`): Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + shadcn/ui (Radix, "nova" style, neutral) + TanStack Query v5 + date-fns + sonner. See the Frontend section below.
 - **Backend** (`/backend`): FastAPI + SQLAlchemy 2.0 (typed ORM) + Pydantic v2 + pydantic-settings + Alembic + PostgreSQL 16 (psycopg 3 driver).
 - **Tests:** pytest + FastAPI `TestClient`, backed by `httpx2` (the client Starlette 1.8 recommends; plain `httpx` triggers a deprecation warning).
-- **Infra:** Docker Compose.
+- **Infra:** Docker Compose (db + api + web), GitHub Actions CI. See the "Docker", "Environment files" and "CI" sections.
 - **Deploy targets:** Vercel (frontend), Render (backend), Neon (Postgres).
 - ALL config must come from environment variables. Nothing environment-specific may be hardcoded.
 
@@ -170,6 +170,51 @@ cp .env.example .env.local                # if .env.local does not exist yet
 npm run dev                               # http://localhost:3000
 ```
 
+Dev mode and the full Docker stack both use ports 3000 and 8000. Before running `npm run dev` / uvicorn locally, run `docker compose stop api web` and keep `db` running.
+
+## Docker
+
+- **Full stack:** `docker compose up --build -d` starts `db` (Postgres 16, host port 5433), `api` (:8000) and `web` (:3000). `docker compose ps` should show all three as `healthy`. No `.env` is needed, because every override uses `${VAR:-default}`.
+- **`backend/Dockerfile`:**
+  - `python:3.13-slim`, runtime deps only (`requirements.txt`, which pins `tzdata` so `zoneinfo` works on slim), running as the non-root user `leadflow`.
+  - `docker-entrypoint.sh` runs `alembic upgrade head`, then `python -m app.seed` if `SEED_ON_STARTUP=true` (idempotent), then `exec uvicorn` on `0.0.0.0:${PORT:-8000}` without `--reload`.
+  - The `HEALTHCHECK` is a Python `urllib` one-liner hitting `/api/health`, because slim images have no curl. The compose `api` healthcheck only sets the timings and inherits that command.
+- **`frontend/Dockerfile`:**
+  - Multi-stage on `node:22-alpine` (deps, build, run).
+  - `next.config.ts` has `output: "standalone"`. The run stage copies `.next/standalone` and `.next/static`, runs `node server.js` as the `node` user, and has a `fetch` healthcheck.
+  - `NEXT_PUBLIC_API_URL` is a **build ARG**, inlined at build time. In compose it is `http://localhost:8000/api`, because the browser calls the API.
+  - `.dockerignore` excludes `.env*`, so a local `.env.local` can't override the build arg.
+- **Useful commands:**
+  - `docker compose logs api` shows migrations, the seed summary and requests.
+  - `docker compose exec api python -m app.seed --reset` refreshes the demo data.
+  - `docker compose down` stops everything and keeps the data volume.
+  - `docker compose down -v` also deletes the data.
+- **Verifying Docker changes:** `docker compose down -v && docker compose up --build -d`, then wait for healthy and curl `/api/health`, `/api/leads` (10 leads) and `:3000`.
+- **`npm start`:** with `output: "standalone"`, `next start` still serves but warns. Use Docker (or `npm run dev`) instead.
+
+## Environment files
+
+- **`/.env.example`** lists EVERY variable the project reads, with safe defaults. Each one is tagged by what reads it: `[compose]`, `[backend]`, `[tests]`, `[entrypoint]` or `[frontend]`. Copy it to `/.env` only to override compose defaults.
+- **`backend/.env.example`** → `backend/.env`: `DATABASE_URL`, `CORS_ORIGINS`, `ENVIRONMENT`, `SEED_TIMEZONE`, `TEST_DATABASE_URL`. `SEED_ON_STARTUP` and `PORT` are documented there but read only by the container entrypoint.
+- **`frontend/.env.example`** → `frontend/.env.local`: `NEXT_PUBLIC_API_URL`.
+- **Keep the three files consistent** with each other, with the code (`app/core/config.py`, `tests/conftest.py`, `docker-entrypoint.sh`, `src/lib/env.ts`) and with the README's env table. When adding a variable, update all of them.
+- `ENVIRONMENT` is read into settings but not used for any behaviour yet.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request.
+
+- **`backend` job:**
+  - Uses a Postgres 16 service container on port 5432.
+  - Sets `DATABASE_URL`, `CORS_ORIGINS` and `TEST_DATABASE_URL` as env vars (there is no `.env` in CI).
+  - Runs `pip install -r requirements-dev.txt`, then `pytest -v`.
+  - Caches pip.
+- **`frontend` job:**
+  - Runs `npm ci`, `npm run lint`, `npx next typegen`, `npx tsc --noEmit`, `npm run format:check`, `npm test`, then `npm run build`, with a dummy `NEXT_PUBLIC_API_URL`.
+  - Caches npm.
+  - `next typegen` is required on a fresh checkout, otherwise `tsc` fails on `LayoutProps`.
+- **Validate after editing:** `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`.
+
 ## Frontend
 
 Next.js **16.4** is newer than most training data, and its APIs and conventions differ (e.g. Tailwind v4 runs through the `@tailwindcss/turbopack` loader in `next.config.ts`, with no PostCSS config; Cache Components and Partial Prefetching are on). Before writing Next.js-specific code, read the relevant guide in `frontend/node_modules/next/dist/docs/` and heed deprecation notices. `agentRules: false` in `next.config.ts` stops `next dev` from writing its own `AGENTS.md`, so this paragraph replaces it.
@@ -295,7 +340,7 @@ npm test               # Vitest unit tests (src/**/*.test.ts); TZ is pinned to A
 
 ### Environment
 
-- `NEXT_PUBLIC_API_URL`: the API base URL including `/api`, e.g. `http://localhost:8000/api` locally, or the Render URL in production. A trailing slash is stripped, and the app throws a clear error at startup if it's missing.
+- `NEXT_PUBLIC_API_URL`: the API base URL including `/api`, e.g. `http://localhost:8000/api` locally, or the Render URL in production. A trailing slash is stripped, and the app throws a clear error at startup (and at build time) if it's missing.
 - `NEXT_PUBLIC_*` values are inlined at build time, so restart `npm run dev` or rebuild after changing them.
 - Template: `frontend/.env.example`. The local copy is `frontend/.env.local` (gitignored).
 - The API must allow the frontend origin via `CORS_ORIGINS` in `backend/.env`.

@@ -1,0 +1,10 @@
+# Installed and built inside the image instead.
+node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+# Local env files must not leak into the build: NEXT_PUBLIC_API_URL comes from the build arg.
+.env*
+npm-debug.log*
+Dockerfile
+.dockerignore
