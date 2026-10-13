@@ -1,0 +1,50 @@
+name: Reset demo data
+
+# The seed is relative to "now", so the deployed demo goes stale; reset it every morning.
+on:
+  schedule:
+    - cron: "30 3 * * *" # 03:30 UTC = 09:00 IST
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  reset:
+    name: POST /api/demo/reset
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Reset the demo data
+        env:
+          DEMO_API_URL: ${{ secrets.DEMO_API_URL }} # e.g. https://leadflow-api.onrender.com/api
+          DEMO_RESET_TOKEN: ${{ secrets.DEMO_RESET_TOKEN }}
+        run: |
+          if [ -z "$DEMO_API_URL" ] || [ -z "$DEMO_RESET_TOKEN" ]; then
+            echo "::notice title=Demo reset skipped::Set the DEMO_API_URL and DEMO_RESET_TOKEN repository secrets to enable the daily reset."
+            exit 0
+          fi
+
+          url="${DEMO_API_URL%/}/demo/reset"
+          # A free Render instance may need up to a minute to wake up: long timeout, retries with backoff.
+          for attempt in 1 2 3 4; do
+            status=$(curl --silent --show-error --max-time 120 --request POST \
+              --header "X-Demo-Token: $DEMO_RESET_TOKEN" \
+              --output response.json --write-out '%{http_code}' "$url") || status=000
+
+            if [ "$status" = "200" ]; then
+              echo "Demo data reset: $(cat response.json)"
+              exit 0
+            fi
+            if [ "$status" = "401" ] || [ "$status" = "404" ]; then
+              echo "::error::HTTP $status. Check that DEMO_RESET_TOKEN matches on Render and in GitHub, and that DEMO_API_URL ends with /api."
+              exit 1
+            fi
+
+            echo "Attempt $attempt failed with HTTP $status"
+            if [ "$attempt" -lt 4 ]; then
+              sleep $((15 * 2 ** (attempt - 1))) # 15 s, 30 s, 60 s
+            fi
+          done
+
+          echo "::error::Demo reset failed after 4 attempts (last HTTP status: $status)."
+          exit 1

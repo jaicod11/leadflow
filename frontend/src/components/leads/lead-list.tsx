@@ -11,6 +11,7 @@ import {
 } from "@/components/leads/lead-list-states";
 import { LeadSection } from "@/components/leads/lead-section";
 import { LeadToolbar } from "@/components/leads/lead-toolbar";
+import { useDelayedFlag } from "@/hooks/use-delayed-flag";
 import { useLeadFilters } from "@/hooks/use-lead-filters";
 import { useLeads } from "@/hooks/use-leads";
 import { useNow } from "@/hooks/use-now";
@@ -19,6 +20,8 @@ import { groupLeads } from "@/lib/lead-groups";
 import type { Lead } from "@/lib/types";
 
 const HIGHLIGHT_DURATION_MS = 2000;
+// After this long on the first load, explain the wait (a free-tier API may be cold-starting).
+const SLOW_FIRST_LOAD_MS = 4000;
 
 export interface LeadListHandle {
   /** Make a (new) lead visible: clear filters that would hide it, scroll to its card, highlight it. */
@@ -77,6 +80,10 @@ export function LeadList({ onSelect, ref }: LeadListProps) {
   const retry = () => void refetch();
   // Background refetch (filter/search change, window focus) while results are already on screen.
   const isRefreshing = isFetching && !isPending;
+  const isSlowFirstLoad = useDelayedFlag(
+    leads === undefined && !error,
+    SLOW_FIRST_LOAD_MS,
+  );
 
   function renderResults() {
     if (leads === undefined) {
@@ -87,7 +94,18 @@ export function LeadList({ onSelect, ref }: LeadListProps) {
           isRetrying={isFetching}
         />
       ) : (
-        <LeadListSkeleton />
+        <>
+          <LeadListSkeleton />
+          {isSlowFirstLoad && (
+            <p
+              role="status"
+              className="text-center text-sm text-muted-foreground"
+            >
+              Waking up the API server — free hosting can take up to a minute on
+              the first visit…
+            </p>
+          )}
+        </>
       );
     }
 

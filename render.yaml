@@ -1,0 +1,30 @@
+# Render Blueprint: the LeadFlow API as a free Docker web service.
+# Postgres lives on Neon, so no database is defined here.
+# Spec: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: leadflow-api
+    runtime: docker
+    plan: free
+    # Keep the API next to the Neon database (create Neon in AWS Asia Pacific, Singapore).
+    # Render can't change a service's region after it is created.
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    # Deploy on every push to the Blueprint's branch (replaces the deprecated `autoDeploy: true`).
+    autoDeployTrigger: commit
+    buildFilter:
+      paths:
+        - backend/** # frontend-only changes don't redeploy the API
+    envVars:
+      - key: DATABASE_URL
+        sync: false # Neon DIRECT (non "-pooler") connection string; prompted in the dashboard
+      - key: CORS_ORIGINS
+        sync: false # the Vercel URL, e.g. https://leadflow.vercel.app
+      - key: DEMO_RESET_TOKEN
+        sync: false # long random string; the same value goes into the GitHub secret DEMO_RESET_TOKEN
+      - key: SEED_ON_STARTUP
+        value: "true"
+      - key: SEED_TIMEZONE
+        value: Asia/Kolkata

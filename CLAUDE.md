@@ -72,6 +72,7 @@ All routes are under the `/api` prefix (interactive docs at `/docs`).
 | PATCH | `/api/leads/{lead_id}` | `LeadUpdate` | 200 `LeadRead` | 400 (empty body, follow-up in the past), 404, 422 |
 | GET | `/api/leads/{lead_id}/discussions` | — | 200 `DiscussionRead[]`, newest first | 404, 422 |
 | POST | `/api/leads/{lead_id}/discussions` | `DiscussionCreate` | 201 `DiscussionRead` | 400 (follow-up in the past), 404, 422 |
+| POST | `/api/demo/reset` (hidden: `include_in_schema=False`) | header `X-Demo-Token` | 200 `{"leads": n, "discussions": n}` | 404 `"Not found"` when `DEMO_RESET_TOKEN` is unset/empty; 401 `"Invalid demo token"` |
 
 There is no DELETE endpoint and no pagination; both are out of scope.
 
@@ -108,6 +109,7 @@ There is no DELETE endpoint and no pagination; both are out of scope.
 | Status | When | Body |
 | --- | --- | --- |
 | 400 | Business rule violated (`BusinessRuleError`) | `{"detail": "..."}` |
+| 401 | Bad or missing demo token (`UnauthorizedError`) | `{"detail": "Invalid demo token"}` |
 | 404 | Missing resource (`NotFoundError`) | `{"detail": "Lead not found"}` |
 | 422 | Request validation failed | `{"detail": "Validation failed", "errors": [{"field": "name", "message": "..."}]}` |
 | 500 | Unhandled exception | `{"detail": "Internal server error"}` (traceback logged server-side, exactly once) |
@@ -195,10 +197,9 @@ Dev mode and the full Docker stack both use ports 3000 and 8000. Before running 
 ## Environment files
 
 - **`/.env.example`** lists EVERY variable the project reads, with safe defaults. Each one is tagged by what reads it: `[compose]`, `[backend]`, `[tests]`, `[entrypoint]` or `[frontend]`. Copy it to `/.env` only to override compose defaults.
-- **`backend/.env.example`** → `backend/.env`: `DATABASE_URL`, `CORS_ORIGINS`, `ENVIRONMENT`, `SEED_TIMEZONE`, `TEST_DATABASE_URL`. `SEED_ON_STARTUP` and `PORT` are documented there but read only by the container entrypoint.
-- **`frontend/.env.example`** → `frontend/.env.local`: `NEXT_PUBLIC_API_URL`.
-- **Keep the three files consistent** with each other, with the code (`app/core/config.py`, `tests/conftest.py`, `docker-entrypoint.sh`, `src/lib/env.ts`) and with the README's env table. When adding a variable, update all of them.
-- `ENVIRONMENT` is read into settings but not used for any behaviour yet.
+- **`backend/.env.example`** → `backend/.env`: `DATABASE_URL`, `CORS_ORIGINS`, `SEED_TIMEZONE`, `DEMO_RESET_TOKEN`, `TEST_DATABASE_URL`. `SEED_ON_STARTUP` and `PORT` are documented there but read only by the container entrypoint.
+- **`frontend/.env.example`** → `frontend/.env.local`: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE`.
+- **Keep the three files consistent** with each other, with the code (`app/core/config.py`, `tests/conftest.py`, `docker-entrypoint.sh`, `src/lib/env.ts`), with `render.yaml` and with the README's env table. When adding a variable, update all of them.
 
 ## CI
 
@@ -213,7 +214,34 @@ Dev mode and the full Docker stack both use ports 3000 and 8000. Before running 
   - Runs `npm ci`, `npm run lint`, `npx next typegen`, `npx tsc --noEmit`, `npm run format:check`, `npm test`, then `npm run build`, with a dummy `NEXT_PUBLIC_API_URL`.
   - Caches npm.
   - `next typegen` is required on a fresh checkout, otherwise `tsc` fails on `LayoutProps`.
-- **Validate after editing:** `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12`.
+- **`reset-demo.yml`:**
+  - Runs daily at 03:30 UTC (09:00 IST) and via `workflow_dispatch`, with `permissions: {}`.
+  - Calls `POST $DEMO_API_URL/demo/reset` with `X-Demo-Token: $DEMO_RESET_TOKEN`, both from repo secrets.
+  - Uses a 120 s curl timeout and 4 attempts with 15/30/60 s backoff (for Render cold starts). It fails fast on 401/404, fails on any non-200, and skips with a notice if the secrets are missing.
+- **Validate after editing:** `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12` (this also shellchecks the `run:` scripts).
+
+## Deployment (Vercel → Render → Neon)
+
+Step-by-step instructions are in the README's "Deployment" section. Things to keep in mind when changing code:
+
+- **Neon:** use the DIRECT (non `-pooler`) connection string. `create_db_engine` sends `options=-c timezone=utc` on every connection, and Neon's pooler rejects that startup option. `postgresql://…?sslmode=require&channel_binding=require` works as-is: the config normalizer adds `+psycopg` and keeps the query (see `tests/test_config.py`).
+- **Render:**
+  - `render.yaml` (Blueprint) defines the one free Docker web service `leadflow-api` (region singapore, which can't be changed after creation). It uses `dockerfilePath ./backend/Dockerfile`, `dockerContext ./backend`, `healthCheckPath /api/health`, `autoDeployTrigger: commit` (`autoDeploy` is deprecated) and `buildFilter backend/**`.
+  - Env vars: `DATABASE_URL`, `CORS_ORIGINS` and `DEMO_RESET_TOKEN` are `sync: false`. `SEED_ON_STARTUP=true` and `SEED_TIMEZONE=Asia/Kolkata` are fixed values. Render injects `PORT`.
+  - Validate the file with `check-jsonschema --schemafile https://render.com/schema/render.yaml.json render.yaml`.
+  - The entrypoint runs uvicorn with `--proxy-headers --forwarded-allow-ips "*"`, because Render sits behind a proxy.
+- **Vercel:**
+  - Root Directory `frontend`.
+  - `NEXT_PUBLIC_API_URL=https://<service>.onrender.com/api` and `NEXT_PUBLIC_DEMO_MODE=true`. Both are build-time values, so redeploy after changing them.
+  - Then set Render's `CORS_ORIGINS` to the Vercel URL (comma-separated, trailing slash ignored). Preview URLs are not allowed unless added.
+- **Demo reset:** `POST /api/demo/reset` (`app/api/routes/demo.py`) is hidden from OpenAPI.
+  - It is enabled only when `DEMO_RESET_TOKEN` is non-empty (otherwise 404). It checks `X-Demo-Token` with `secrets.compare_digest` (401 on mismatch).
+  - It calls `app.seed.reset_demo_data(db)`, the reusable TRUNCATE + seed in one transaction, and returns the counts. The CLI `python -m app.seed [--reset]` behaves exactly as before.
+- **Cold starts (frontend):**
+  - `lib/query-retry.ts`: queries retry only `ApiError` status 0/502/503/504, up to 3 times with 2/4/8 s backoff. Mutations never retry.
+  - `LeadList` shows "Waking up the API server…" under the skeleton once the first load takes more than 4 s (`useDelayedFlag`).
+  - `ApiError` lives in `lib/api/errors.ts` (no env import), so pure modules and their tests can use it.
+- **Demo footer:** `components/demo-footer.tsx` shows "Demo instance · data resets daily at 9:00 AM IST" only when `NEXT_PUBLIC_DEMO_MODE` is `true` (`lib/demo-mode.ts`).
 
 ## Frontend
 
@@ -245,7 +273,8 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
 - `lib/lead-filters.ts`: `matchesLeadFilters(lead, { status, search })` mirrors the API's filtering.
 - `components/ui/button.tsx` has an extra `brand` variant (blue) for LeadFlow's call-to-action buttons.
 - `test/lead-factory.ts`: test-only helpers (`makeLead`, `istToApi`).
-- `lib/api/`: `client.ts` (`apiFetch<T>`, `ApiError`), `leads.ts`, `discussions.ts`
+- `lib/api/`: `client.ts` (`apiFetch<T>`), `errors.ts` (`ApiError` + React Query error typing), `leads.ts`, `discussions.ts`
+- `lib/query-retry.ts` (retry policy), `lib/demo-mode.ts` (`NEXT_PUBLIC_DEMO_MODE` parsing); `components/demo-footer.tsx`; `hooks/use-delayed-flag.ts`
 - `lib/types.ts`: TypeScript mirrors of the backend schemas (snake_case, datetimes as ISO strings). Keep them in sync with `backend/app/schemas/`.
 - `lib/lead-status.ts`: status order, labels, badge classes, `isClosedStatus()`
 - `lib/query-keys.ts`: query key factory (`leads.all`, `leads.lists()`, `leads.list(params)`, `leads.detail(id)`, `discussions.byLead(id)`)

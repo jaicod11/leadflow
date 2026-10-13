@@ -26,6 +26,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
       SEED_TIMEZONE: ${SEED_TIMEZONE:-Asia/Kolkata}
+      # Empty = POST /api/demo/reset is disabled (404).
+      DEMO_RESET_TOKEN: ${DEMO_RESET_TOKEN:-}
     ports:
       - "8000:8000"
     depends_on:
@@ -45,6 +47,8 @@ services:
         # Inlined into the browser bundle at build time. The BROWSER calls the API,
         # so this is localhost (the published port), not the "api" service name.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+        # "true" shows the public-demo footer.
+        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
     ports:
       - "3000:3000"
     depends_on:

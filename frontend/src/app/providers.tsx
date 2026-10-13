@@ -10,11 +10,18 @@ import type { ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { queryRetryDelay, shouldRetryQuery } from "@/lib/query-retry";
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
-      queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: true },
+      queries: {
+        staleTime: 30_000,
+        // Retries only network/gateway errors (a cold-starting API), with exponential backoff.
+        retry: shouldRetryQuery,
+        retryDelay: queryRetryDelay,
+        refetchOnWindowFocus: true,
+      },
       mutations: { retry: false },
     },
   });

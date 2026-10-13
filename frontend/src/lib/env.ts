@@ -1,3 +1,5 @@
+import { parseDemoMode } from "@/lib/demo-mode";
+
 function readApiUrl(): string {
   // Must be accessed as a literal `process.env.NEXT_PUBLIC_*` so Next.js can inline it at build time.
   const value = process.env.NEXT_PUBLIC_API_URL?.trim();
@@ -13,4 +15,6 @@ function readApiUrl(): string {
 export const env = {
   /** Base URL of the API including the /api prefix, without a trailing slash. */
   apiUrl: readApiUrl(),
+  /** Public demo deployment: shows the "data resets daily" footer. */
+  demoMode: parseDemoMode(process.env.NEXT_PUBLIC_DEMO_MODE),
 } as const;

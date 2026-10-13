@@ -46,8 +46,9 @@ Screenshots live in [`docs/screenshots/`](docs/screenshots/).
 - [x] Live time: "time ago", today and overdue update every minute without a refresh, including across midnight
 - [x] A newly created lead is scrolled into view and briefly highlighted, and filters that would hide it are cleared
 - [x] Consistent JSON errors with field-level messages, shown inline under form fields
-- [x] Tests: 37 backend (pytest) and 94 frontend (Vitest)
+- [x] Tests: 46 backend (pytest) and 114 frontend (Vitest)
 - [x] GitHub Actions CI for both apps
+- [x] Deployment-ready: Render Blueprint, cold-start friendly frontend (retries + "waking up" notice), and a daily demo reset
 
 ## Tech stack
 
@@ -143,7 +144,7 @@ The seed is idempotent: without `--reset` it leaves an existing database untouch
 
 ## Testing
 
-**Backend:** 37 tests (pytest). The suite needs the `db` container. It uses a **separate `leadflow_test` database**, which it creates if missing and migrates down and up on every run (so the migrations get tested too). It truncates all tables before each test.
+**Backend:** 46 tests (pytest). The suite needs the `db` container. It uses a **separate `leadflow_test` database**, which it creates if missing and migrates down and up on every run (so the migrations get tested too). It truncates all tables before each test.
 
 ```bash
 cd backend
@@ -151,7 +152,7 @@ source .venv/bin/activate
 pytest -v
 ```
 
-**Frontend:** 94 unit tests (Vitest) for the pure date, grouping, follow-up and lead-form logic, with the timezone pinned to Asia/Kolkata. Plus lint, types, formatting and a production build:
+**Frontend:** 114 unit tests (Vitest) for the pure date, grouping, follow-up, lead-form, retry and demo-mode logic, with the timezone pinned to Asia/Kolkata. Plus lint, types, formatting and a production build:
 
 ```bash
 cd frontend
@@ -173,12 +174,15 @@ Every variable is listed in the root [`.env.example`](.env.example). Locally, th
 | --- | --- | --- | --- | --- |
 | `DATABASE_URL` | backend | yes | compose: the `db` service | SQLAlchemy URL. `postgres://` and `postgresql://` URLs (Render, Neon) are rewritten to the psycopg driver |
 | `CORS_ORIGINS` | backend, compose | yes | compose: `http://localhost:3000` | Comma-separated browser origins allowed to call the API |
-| `ENVIRONMENT` | backend | no | `development` | Environment name; read into settings, not used for any behaviour yet |
 | `SEED_TIMEZONE` | backend (seed), compose | no | `Asia/Kolkata` | Timezone that defines "today" for the seeded follow-ups |
 | `SEED_ON_STARTUP` | API container, compose | no | `false` (compose: `true`) | Seed demo data when the API container starts; skipped if leads exist |
+| `DEMO_RESET_TOKEN` | backend, compose | no | empty (disabled) | Enables `POST /api/demo/reset` when set; callers must send it in `X-Demo-Token` |
 | `PORT` | API container | no | `8000` | Port uvicorn listens on inside the container (Render injects it) |
 | `TEST_DATABASE_URL` | backend tests | no | `…@localhost:5433/leadflow_test` | Separate test database; must differ from `DATABASE_URL` |
 | `NEXT_PUBLIC_API_URL` | frontend (build time), compose build arg | yes | compose: `http://localhost:8000/api` | API base URL including `/api`. Inlined into the browser bundle, so rebuild after changing it |
+| `NEXT_PUBLIC_DEMO_MODE` | frontend (build time), compose build arg | no | `false` | `true` shows the "Demo instance · data resets daily at 9:00 AM IST" footer |
+
+The reset workflow also needs two **GitHub repository secrets**, `DEMO_API_URL` and `DEMO_RESET_TOKEN` (see [Deployment](#deployment)).
 
 ## Project structure
 
@@ -206,8 +210,11 @@ LeadFlow/
 │   │   └── lib/             # API client, types, pure date/grouping/form logic (+ Vitest tests)
 │   └── Dockerfile
 ├── docs/screenshots/
-├── .github/workflows/ci.yml
+├── .github/workflows/
+│   ├── ci.yml               # tests, lint, types, build on every push/PR
+│   └── reset-demo.yml       # daily demo-data reset (09:00 IST)
 ├── docker-compose.yml
+├── render.yaml              # Render Blueprint for the API
 ├── .env.example
 └── CLAUDE.md                # rules the AI coding agent followed (see AI usage)
 ```
@@ -225,6 +232,11 @@ Interactive docs: **http://localhost:8000/docs**. All routes are under `/api`. D
 | PATCH | `/api/leads/{lead_id}` | 200 lead | 400, 404, 422 |
 | GET | `/api/leads/{lead_id}/discussions` | 200 discussions, newest first | 404, 422 |
 | POST | `/api/leads/{lead_id}/discussions` | 201 discussion | 400, 404, 422 |
+
+There is one more endpoint, hidden from `/docs` and meant only for the deployed demo: `POST /api/demo/reset` with the header `X-Demo-Token`.
+- It is disabled (404) unless `DEMO_RESET_TOKEN` is set.
+- A missing or wrong token gets 401.
+- Success is 200 `{"leads": 10, "discussions": 27}`, after it wipes the data and seeds it again.
 
 Error responses are always JSON:
 
@@ -269,4 +281,72 @@ This project was built with AI assistance:
 
 ## Deployment
 
-_Coming soon: Vercel (frontend) + Render (backend) + Neon (Postgres)._
+**Architecture:** Browser → **Vercel** (Next.js) → **Render** (FastAPI in Docker, free plan) → **Neon** (Postgres).
+
+The repo is deployment-ready:
+- [`render.yaml`](render.yaml) is the Render Blueprint.
+- The API container migrates the database (and seeds it if empty) on start-up.
+- [`.github/workflows/reset-demo.yml`](.github/workflows/reset-demo.yml) refreshes the demo data every morning.
+
+### 1. Neon (database)
+
+1. Create a Neon project. Choose **AWS Asia Pacific (Singapore)**, the same region as the API in `render.yaml`.
+2. Open **Connect**, switch **connection pooling off**, and copy the **direct** connection string. Its host must **not** contain `-pooler`:
+   `postgresql://<user>:<password>@ep-<id>.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`
+   - **Why direct:** every API connection sends the startup option `-c timezone=utc`, which Neon's pooler doesn't accept.
+   - **No editing needed:** the API rewrites `postgresql://` to the psycopg driver automatically.
+
+You don't need to create tables. The API runs `alembic upgrade head` every time it starts.
+
+### 2. Render (API)
+
+1. In Render: **New → Blueprint**, then pick this GitHub repo. Render reads `render.yaml` and proposes the `leadflow-api` web service (Docker, free plan, Singapore). It redeploys on every push that changes `backend/`.
+2. Enter the values Render asks for:
+
+   | Variable | Value |
+   | --- | --- |
+   | `DATABASE_URL` | the Neon **direct** connection string from step 1 |
+   | `CORS_ORIGINS` | `http://localhost:3000` for now; you replace it in step 4 |
+   | `DEMO_RESET_TOKEN` | a long random string, e.g. the output of `openssl rand -hex 32` (keep it for step 5) |
+
+   `SEED_ON_STARTUP=true` and `SEED_TIMEZONE=Asia/Kolkata` come from `render.yaml`, and Render injects `PORT`.
+3. After the first deploy, open `https://<your-service>.onrender.com/api/health`. It should return `{"status":"ok","database":"ok"}`. The first start seeds the demo data.
+
+### 3. Vercel (frontend)
+
+1. In Vercel: **Add New → Project**, then import this repo.
+2. Set **Root Directory** to `frontend`. The framework (Next.js) is detected automatically. Use Node.js 22.x or newer.
+3. Add these environment variables before the first deploy. They are inlined at build time, so redeploy after changing them.
+
+   | Variable | Value |
+   | --- | --- |
+   | `NEXT_PUBLIC_API_URL` | `https://<your-service>.onrender.com/api` |
+   | `NEXT_PUBLIC_DEMO_MODE` | `true` (shows the "data resets daily" footer) |
+
+4. Deploy and note the URL, e.g. `https://leadflow.vercel.app`.
+
+### 4. Allow the Vercel URL on Render
+
+In Render, go to **leadflow-api → Environment** and set `CORS_ORIGINS` to your Vercel URL, e.g. `https://leadflow.vercel.app`. Separate several origins with commas; a trailing slash is ignored. Saving redeploys the API.
+
+Vercel preview deployments have their own URLs, so they are blocked unless you add them too.
+
+### 5. GitHub secrets for the daily reset
+
+In the GitHub repo, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Secret | Value |
+| --- | --- |
+| `DEMO_API_URL` | `https://<your-service>.onrender.com/api` |
+| `DEMO_RESET_TOKEN` | the same value as on Render |
+
+Then open **Actions → Reset demo data → Run workflow** once to test it. Without these secrets the workflow skips with a notice instead of failing.
+
+### Free tier notes
+
+- **Cold starts:** Render's free web services sleep after about 15 minutes without traffic, and the first request can take up to a minute. The frontend copes:
+  - it retries network errors and 502/503/504 up to 3 times with exponential backoff (never 4xx);
+  - it shows *"Waking up the API server — free hosting can take up to a minute on the first visit…"* if the first load takes more than 4 seconds.
+
+  Neon's free compute also scales to zero when idle and resumes on the first query.
+- **Daily reset:** the seed is relative to "now", so the demo's "today" follow-ups go stale. The reset workflow runs at **03:30 UTC (09:00 IST)**. It calls `POST /api/demo/reset` with a 120-second timeout and up to 4 attempts with backoff (15, 30, then 60 s), and fails on anything but HTTP 200. GitHub may start scheduled runs a little late, and it pauses schedules in repos with no activity for 60 days.

@@ -4,6 +4,7 @@ import { Suspense, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/app-header";
+import { DemoFooter } from "@/components/demo-footer";
 import { AddLeadDialog } from "@/components/leads/add-lead-dialog";
 import { LeadList, type LeadListHandle } from "@/components/leads/lead-list";
 import { LeadListSkeleton } from "@/components/leads/lead-list-skeleton";
@@ -37,6 +38,7 @@ export function LeadsScreen() {
           <LeadList ref={leadListRef} onSelect={setSelectedLeadId} />
         </Suspense>
       </main>
+      <DemoFooter />
       <LeadTimelineDialog
         leadId={selectedLeadId}
         onClose={() => setSelectedLeadId(null)}
