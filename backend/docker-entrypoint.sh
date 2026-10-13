@@ -9,4 +9,5 @@ if [ "${SEED_ON_STARTUP:-false}" = "true" ]; then
   python -m app.seed
 fi
 
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+# PORT is injected by Render. Behind its proxy, trust X-Forwarded-* so the real scheme/client IP are used.
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" --proxy-headers --forwarded-allow-ips "*"

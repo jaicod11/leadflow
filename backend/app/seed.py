@@ -397,18 +397,35 @@ def _print_summary(leads: list[Lead], clock: DemoClock) -> None:
         print("  ".join(value.ljust(width) for value, width in zip(line, widths, strict=True)).rstrip())
 
 
-def seed(db: Session, *, reset: bool = False) -> bool:
-    """Insert the demo data and return True; return False without changes if leads exist and reset is False."""
+@dataclass(frozen=True)
+class DemoDataCounts:
+    leads: int
+    discussions: int
+
+
+def _insert_demo_data(db: Session, *, reset: bool) -> tuple[list[Lead], DemoClock]:
     if reset:
         db.execute(text("TRUNCATE leads, discussions RESTART IDENTITY CASCADE"))
-    elif db.scalar(select(func.count()).select_from(Lead)):
-        print("The leads table already has data, so nothing was changed. Use --reset to wipe it and seed again.")
-        return False
-
     clock = DemoClock(datetime.now(UTC), ZoneInfo(settings.SEED_TIMEZONE))
     leads = [_build_lead(spec) for spec in _demo_leads(clock)]
     db.add_all(leads)
     db.commit()  # the optional TRUNCATE and all inserts land in one transaction
+    return leads, clock
+
+
+def reset_demo_data(db: Session) -> DemoDataCounts:
+    """Wipe leads and discussions and insert fresh demo data, in one transaction. Prints nothing."""
+    leads, _ = _insert_demo_data(db, reset=True)
+    return DemoDataCounts(leads=len(leads), discussions=sum(len(lead.discussions) for lead in leads))
+
+
+def seed(db: Session, *, reset: bool = False) -> bool:
+    """Insert the demo data and return True; return False without changes if leads exist and reset is False."""
+    if not reset and db.scalar(select(func.count()).select_from(Lead)):
+        print("The leads table already has data, so nothing was changed. Use --reset to wipe it and seed again.")
+        return False
+
+    leads, clock = _insert_demo_data(db, reset=reset)
     _print_summary(leads, clock)
     return True
 

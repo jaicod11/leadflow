@@ -14,8 +14,9 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     CORS_ORIGINS: Annotated[list[str], NoDecode]
-    ENVIRONMENT: str = "development"
     SEED_TIMEZONE: str = "Asia/Kolkata"
+    # Enables POST /api/demo/reset when non-empty (the caller must send it as X-Demo-Token).
+    DEMO_RESET_TOKEN: str = ""
 
     @field_validator("DATABASE_URL")
     @classmethod

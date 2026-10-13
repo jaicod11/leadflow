@@ -29,6 +29,10 @@ class BusinessRuleError(AppError):
     status_code = status.HTTP_400_BAD_REQUEST
 
 
+class UnauthorizedError(AppError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+
 def _field_path(loc: Sequence[int | str]) -> str:
     parts = [str(part) for part in loc]
     if len(parts) > 1 and parts[0] in _LOCATION_PREFIXES:
