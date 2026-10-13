@@ -22,7 +22,7 @@ LeadFlow is a single-screen CRM (a lightweight lead management tool). A sales re
 
 ## Tech stack
 
-- **Frontend** (`/frontend`): Next.js (App Router) + TypeScript + Tailwind CSS + shadcn/ui + TanStack Query.
+- **Frontend** (`/frontend`): Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + shadcn/ui (Radix, "nova" style, neutral) + TanStack Query v5 + date-fns + sonner. See the Frontend section below.
 - **Backend** (`/backend`): FastAPI + SQLAlchemy 2.0 (typed ORM) + Pydantic v2 + pydantic-settings + Alembic + PostgreSQL 16 (psycopg 3 driver).
 - **Tests:** pytest + FastAPI `TestClient`, backed by `httpx2` (the client Starlette 1.8 recommends; plain `httpx` triggers a deprecation warning).
 - **Infra:** Docker Compose.
@@ -162,7 +162,60 @@ cp .env.example .env                      # if .env does not exist yet
 .venv/bin/python -m app.seed              # demo data (only if the DB is empty)
 .venv/bin/uvicorn app.main:app --reload --port 8000
 curl http://localhost:8000/api/health
+
+# in a second terminal
+cd frontend
+npm install
+cp .env.example .env.local                # if .env.local does not exist yet
+npm run dev                               # http://localhost:3000
 ```
+
+## Frontend
+
+Next.js **16.4** is newer than most training data, and its APIs and conventions differ (e.g. Tailwind v4 runs through the `@tailwindcss/turbopack` loader in `next.config.ts`, with no PostCSS config; Cache Components and Partial Prefetching are on). Before writing Next.js-specific code, read the relevant guide in `frontend/node_modules/next/dist/docs/` and heed deprecation notices. `agentRules: false` in `next.config.ts` stops `next dev` from writing its own `AGENTS.md`, so this paragraph replaces it.
+
+### Folder structure (`frontend/src/`)
+
+- `app/`: `layout.tsx` (metadata, fonts, `<Providers>`), `page.tsx` (the single screen), `providers.tsx` (QueryClient, TooltipProvider, Toaster, dev-only React Query Devtools), `globals.css` (Tailwind + shadcn theme)
+- `components/ui/`: shadcn components (button, badge, dialog, input, textarea, label, select, checkbox, skeleton, separator, scroll-area, tooltip, sonner). Add more with `npx shadcn@latest add <name>`, then run `npm run format`. There is no calendar/date-picker; follow-ups use native `<input type="date">` and `<input type="time">`.
+- `components/`: app components (`app-header.tsx`; `api-status-panel.tsx` is TEMPORARY and will be replaced by the lead list)
+- `hooks/`: React Query hooks. `use-leads.ts` (`useLeads`), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`)
+- `lib/api/`: `client.ts` (`apiFetch<T>`, `ApiError`), `leads.ts`, `discussions.ts`
+- `lib/types.ts`: TypeScript mirrors of the backend schemas (snake_case, datetimes as ISO strings). Keep them in sync with `backend/app/schemas/`.
+- `lib/lead-status.ts`: status order, labels, badge classes, `isClosedStatus()`
+- `lib/query-keys.ts`: query key factory (`leads.all`, `leads.lists()`, `leads.list(params)`, `leads.detail(id)`, `discussions.byLead(id)`)
+- `lib/env.ts`: reads and validates `NEXT_PUBLIC_API_URL`
+- `lib/utils.ts`: shadcn `cn()`
+
+### Data-access rules
+
+- **Components only talk to the API through the hooks in `src/hooks/`.** Hooks call `src/lib/api/*`, and only `src/lib/api/client.ts` calls `fetch`. Components never call `fetch` or `apiFetch` directly.
+- **Errors:** every API failure is an `ApiError` with `status`, `message` (the API's `detail`) and `fieldErrors` (`{ field: message }` from a 422). Status `0` means the API was unreachable. React Query's `error` is typed as `ApiError`.
+- **Invalidation:** mutations invalidate on success, so lists update immediately.
+  - Creating a lead invalidates all lead lists.
+  - Updating a lead invalidates all lead lists and that lead's detail.
+  - Creating a discussion invalidates that lead's discussions, all lead lists, and the lead's detail.
+- **Toasts:** hooks never show toasts; components decide.
+- **Query defaults** (in `providers.tsx`): `staleTime` 30 s, `retry: 1` for queries, no retry for mutations, refetch on window focus. `useLeads` uses `keepPreviousData` so filtering and searching never flash an empty list.
+- **Dates:** "today" and "overdue" are computed on the frontend in the user's local timezone (see Business rules). Use date-fns.
+
+### Commands (run from `frontend/`)
+
+```bash
+npm run dev            # dev server on http://localhost:3000 (needs the API on :8000)
+npm run build          # production build
+npm run lint           # ESLint (eslint-config-next)
+npx tsc --noEmit       # type check
+npm run format         # Prettier (+ Tailwind class sorting) over src/
+npm run format:check   # verify formatting
+```
+
+### Environment
+
+- `NEXT_PUBLIC_API_URL`: the API base URL including `/api`, e.g. `http://localhost:8000/api` locally, or the Render URL in production. A trailing slash is stripped, and the app throws a clear error at startup if it's missing.
+- `NEXT_PUBLIC_*` values are inlined at build time, so restart `npm run dev` or rebuild after changing them.
+- Template: `frontend/.env.example`. The local copy is `frontend/.env.local` (gitignored).
+- The API must allow the frontend origin via `CORS_ORIGINS` in `backend/.env`.
 
 ## Migrations
 
