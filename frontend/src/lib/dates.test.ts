@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatFollowUp,
-  formatTime,
   formatTimeAgo,
+  formatTimestamp,
   isFollowUpOverdue,
   isFollowUpToday,
 } from "@/lib/dates";
@@ -142,8 +142,20 @@ describe("formatFollowUp", () => {
     ["2026-10-12T23:59:00", "Yesterday at 11:59 PM"],
     ["2026-10-11T23:59:00", "Sun, 11 Oct at 11:59 PM"],
     ["2026-10-15T10:30:00", "Thu, 15 Oct at 10:30 AM"],
+    ["2026-10-15T09:05:00", "Thu, 15 Oct at 9:05 AM"],
   ])("%s -> %s", (localTime, expected) => {
     expect(formatFollowUp(istToApi(localTime), NOW)).toBe(expected);
+  });
+
+  it.each([
+    ["2026-10-13T16:30:00", "today at 4:30 PM"],
+    ["2026-10-14T10:30:00", "tomorrow at 10:30 AM"],
+    ["2026-10-12T11:00:00", "yesterday at 11:00 AM"],
+    ["2026-10-15T10:30:00", "Thu, 15 Oct at 10:30 AM"],
+  ])("mid-sentence: %s -> %s", (localTime, expected) => {
+    expect(
+      formatFollowUp(istToApi(localTime), NOW, { midSentence: true }),
+    ).toBe(expected);
   });
 
   it("converts the API's UTC time to local time", () => {
@@ -154,9 +166,14 @@ describe("formatFollowUp", () => {
   });
 });
 
-describe("formatTime", () => {
-  it("formats local clock time", () => {
-    expect(formatTime(istToApi("2026-10-13T14:00:00"))).toBe("2:00 PM");
-    expect(formatTime(istToApi("2026-10-13T09:05:00"))).toBe("9:05 AM");
+describe("formatTimestamp", () => {
+  it("formats an absolute local date and time", () => {
+    expect(formatTimestamp(istToApi("2026-10-13T16:30:00"))).toBe(
+      "Oct 13, 4:30 PM",
+    );
+    // 20:00 UTC on the 12th is 01:30 on the 13th in Kolkata.
+    expect(formatTimestamp("2026-10-12T20:00:00+00:00")).toBe(
+      "Oct 13, 1:30 AM",
+    );
   });
 });

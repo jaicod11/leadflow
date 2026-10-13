@@ -5,11 +5,12 @@ import { Suspense, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { LeadList } from "@/components/leads/lead-list";
 import { LeadListSkeleton } from "@/components/leads/lead-list-skeleton";
+import { LeadTimelineDialog } from "@/components/leads/timeline/lead-timeline-dialog";
 
-/** The single LeadFlow screen. Owns UI state shared by the list and the upcoming dialogs. */
+/** The single LeadFlow screen. Owns UI state shared by the list and its dialogs. */
 export function LeadsScreen() {
-  // The selected lead opens the timeline dialog, which reads this value once it exists.
-  const [, setSelectedLeadId] = useState<number | null>(null);
+  // Clicking a lead card selects it, which opens its timeline dialog; closing clears it.
+  const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
 
   return (
     <>
@@ -20,6 +21,10 @@ export function LeadsScreen() {
           <LeadList onSelect={setSelectedLeadId} />
         </Suspense>
       </main>
+      <LeadTimelineDialog
+        leadId={selectedLeadId}
+        onClose={() => setSelectedLeadId(null)}
+      />
     </>
   );
 }

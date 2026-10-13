@@ -2,7 +2,6 @@ import { CalendarClock, CircleAlert, Clock } from "lucide-react";
 
 import {
   formatFollowUp,
-  formatTime,
   isFollowUpOverdue,
   isFollowUpToday,
 } from "@/lib/dates";
@@ -30,11 +29,13 @@ export function LeadFollowUpChip({
 }: LeadFollowUpChipProps) {
   if (lead.follow_up_at === null || isClosedStatus(lead.status)) return null;
 
+  const when = formatFollowUp(lead.follow_up_at, now, { midSentence: true });
+
   if (isFollowUpOverdue(lead, now)) {
     return (
       <span className={cn(CHIP_CLASSES, "bg-red-100 text-red-700", className)}>
         <CircleAlert className="size-3.5" aria-hidden />
-        Overdue · due {formatFollowUp(lead.follow_up_at, now)}
+        Overdue · due {when}
       </span>
     );
   }
@@ -45,7 +46,7 @@ export function LeadFollowUpChip({
         className={cn(CHIP_CLASSES, "bg-blue-100 text-blue-700", className)}
       >
         <Clock className="size-3.5" aria-hidden />
-        Follow-up today at {formatTime(lead.follow_up_at)}
+        Follow-up {when}
       </span>
     );
   }
@@ -55,7 +56,7 @@ export function LeadFollowUpChip({
       className={cn(CHIP_CLASSES, "bg-neutral-100 text-neutral-600", className)}
     >
       <CalendarClock className="size-3.5" aria-hidden />
-      Follow-up {formatFollowUp(lead.follow_up_at, now)}
+      Follow-up {when}
     </span>
   );
 }

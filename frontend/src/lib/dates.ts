@@ -41,17 +41,34 @@ export function isFollowUpOverdue(lead: FollowUpFields, now: Date): boolean {
   return isBefore(parseISO(lead.follow_up_at), now);
 }
 
-/** Local clock time, e.g. "2:00 PM". */
-export function formatTime(iso: IsoDateTime): string {
-  return format(parseISO(iso), "h:mm a");
+interface FormatFollowUpOptions {
+  /** Lowercase the relative day ("due today at …") for use in the middle of a sentence. */
+  midSentence?: boolean;
 }
 
-/** "Today at 2:00 PM", "Tomorrow at 10:30 AM", "Yesterday at 11:00 AM", otherwise "Thu, 15 Oct at 10:30 AM". */
-export function formatFollowUp(iso: IsoDateTime, now: Date): string {
+/**
+ * "Today at 2:00 PM", "Tomorrow at 10:30 AM", "Yesterday at 11:00 AM", otherwise "Thu, 15 Oct at 10:30 AM".
+ * With `midSentence`: "today at 2:00 PM", "tomorrow at …", "yesterday at …" (weekday dates are unchanged).
+ */
+export function formatFollowUp(
+  iso: IsoDateTime,
+  now: Date,
+  { midSentence = false }: FormatFollowUpOptions = {},
+): string {
   const date = parseISO(iso);
-  const time = formatTime(iso);
-  if (isSameDay(date, now)) return `Today at ${time}`;
-  if (isSameDay(date, addDays(now, 1))) return `Tomorrow at ${time}`;
-  if (isSameDay(date, subDays(now, 1))) return `Yesterday at ${time}`;
-  return `${format(date, "EEE, d MMM")} at ${time}`;
+  const time = format(date, "h:mm a");
+  const relativeDay = isSameDay(date, now)
+    ? "Today"
+    : isSameDay(date, addDays(now, 1))
+      ? "Tomorrow"
+      : isSameDay(date, subDays(now, 1))
+        ? "Yesterday"
+        : null;
+  if (relativeDay === null) return `${format(date, "EEE, d MMM")} at ${time}`;
+  return `${midSentence ? relativeDay.toLowerCase() : relativeDay} at ${time}`;
+}
+
+/** Absolute local date and time, e.g. "Oct 13, 4:30 PM". */
+export function formatTimestamp(iso: IsoDateTime): string {
+  return format(parseISO(iso), "MMM d, h:mm a");
 }

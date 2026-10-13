@@ -184,11 +184,14 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
 - `components/leads/`: the lead list, split into small files.
   - `lead-list.tsx` is the container (filters + `useLeads` + `useNow` + `groupLeads`).
   - Also `lead-toolbar.tsx`, `lead-section.tsx`, `lead-card.tsx`, `lead-status-badge.tsx`, `lead-follow-up-chip.tsx`, `lead-list-skeleton.tsx`, `lead-list-states.tsx` (error and empty states).
+- `components/leads/timeline/`: the lead timeline dialog. See "Timeline dialog" below.
 - `hooks/`
-  - React Query: `use-leads.ts` (`useLeads`), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`).
+  - React Query: `use-leads.ts` (`useLeads`), `use-lead.ts` (`useLead`, seeded from cached lists), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`).
   - UI: `use-lead-filters.ts` (status + search, synced to the URL), `use-now.ts` (current time, refreshed every 60 s), `use-debounced-value.ts`.
-- `lib/dates.ts`: pure date logic (`formatTimeAgo`, `isFollowUpToday`, `isFollowUpOverdue`, `formatFollowUp`, `formatTime`). There is no React here, and every relative function takes `now`.
+- `lib/dates.ts`: pure date logic (`formatTimeAgo`, `isFollowUpToday`, `isFollowUpOverdue`, `formatFollowUp`, `formatTimestamp`). There is no React here, and every relative function takes `now`.
+  - `formatFollowUp(iso, now, { midSentence: true })` lowercases "today/tomorrow/yesterday" for use mid-sentence, e.g. "Overdue · due yesterday at 11:00 AM". Without the option they are capitalized.
 - `lib/lead-groups.ts`: `groupLeads(leads, now)` returns `{ today, others }`.
+- `lib/follow-up-form.ts`: pure helpers for the native date/time inputs: `getDefaultFollowUp(now)`, `toFollowUpIso(date, time)`, `validateFollowUp(date, time, now)`.
 - `test/lead-factory.ts`: test-only helpers (`makeLead`, `istToApi`).
 - `lib/api/`: `client.ts` (`apiFetch<T>`, `ApiError`), `leads.ts`, `discussions.ts`
 - `lib/types.ts`: TypeScript mirrors of the backend schemas (snake_case, datetimes as ISO strings). Keep them in sync with `backend/app/schemas/`.
@@ -233,6 +236,29 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
   - Later refetches keep the previous results (`keepPreviousData`) and show a small spinner next to the section counts.
   - Errors show the `ApiError` message with a Retry button.
   - The empty state reads "No leads yet" with no filters, or "No leads match your filters" with a "Clear filters" button.
+
+### Timeline dialog (`components/leads/timeline/`)
+
+- **Open/close:** clicking a card sets `selectedLeadId` in `LeadsScreen`, which opens `lead-timeline-dialog.tsx` (a shadcn Dialog, not a page). Closing it (×, Esc, overlay, Close) clears the selection. The dialog keeps showing the last lead while its close animation runs.
+- **Layout:** a flex column, `max-h-[85vh]`, `sm:max-w-xl`, nearly full width on mobile.
+  - **Header** (`timeline-header.tsx`):
+    - name, company and `tel:` phone;
+    - `lead-status-select.tsx` (PATCH status, toasts "Status updated to …", reverts to the server value on error);
+    - the active follow-up chip with **Mark done**, which PATCHes `follow_up_at: null` and toasts "Follow-up cleared".
+  - **Middle** (`discussion-timeline.tsx`): scrolls. Discussions are shown in API order (newest first, never re-sorted), with a blue dot on the newest.
+  - **Footer** (`add-discussion-form.tsx` + `follow-up-fields.tsx`): stays fixed.
+    - The textarea is auto-focused; Cmd/Ctrl+Enter submits.
+    - The counter appears after 4500 chars (max 5000).
+    - "Set follow-up" prefills `getDefaultFollowUp`.
+- **Accessibility:** every state renders a `DialogTitle` and `DialogDescription` (sr-only where needed) to avoid Radix warnings.
+- **Form errors:**
+  - Client-side `validateFollowUp` runs before sending.
+  - `ApiError.fieldErrors.note` / `follow_up_at` show inline.
+  - Any other API error shows in a red alert above Save.
+  - The typed note is never cleared on error.
+  - On success the form resets, focus returns to the textarea, and the dialog stays open.
+- **Data:** `useLead(id)` uses `initialData` from any cached lead list (so the header renders instantly) and still refetches in the background. `useCreateDiscussion` / `useUpdateLead` invalidation updates the timeline, the header and the list behind the dialog.
+- **Load failure:** if the lead fails to load (or returns 404, even when a cached copy exists), the dialog shows the error with a Close button.
 
 ### Commands (run from `frontend/`)
 

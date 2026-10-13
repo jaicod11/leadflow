@@ -12,7 +12,7 @@ export const queryKeys = {
     all: LEADS,
     lists: () => [...LEADS, "list"] as const,
     list: (params: LeadListParams) => [...LEADS, "list", params] as const,
-    detail: (id: number) => [...LEADS, "detail", id] as const,
+    detail: (id: number | null) => [...LEADS, "detail", id] as const,
   },
   discussions: {
     all: DISCUSSIONS,
