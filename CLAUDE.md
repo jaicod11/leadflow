@@ -178,8 +178,18 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
 
 - `app/`: `layout.tsx` (metadata, fonts, `<Providers>`), `page.tsx` (the single screen), `providers.tsx` (QueryClient, TooltipProvider, Toaster, dev-only React Query Devtools), `globals.css` (Tailwind + shadcn theme)
 - `components/ui/`: shadcn components (button, badge, dialog, input, textarea, label, select, checkbox, skeleton, separator, scroll-area, tooltip, sonner). Add more with `npx shadcn@latest add <name>`, then run `npm run format`. There is no calendar/date-picker; follow-ups use native `<input type="date">` and `<input type="time">`.
-- `components/`: app components (`app-header.tsx`; `api-status-panel.tsx` is TEMPORARY and will be replaced by the lead list)
-- `hooks/`: React Query hooks. `use-leads.ts` (`useLeads`), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`)
+- `components/`
+  - `leads-screen.tsx`: client wrapper for the single screen. It holds UI state shared with the dialogs (`selectedLeadId`) and wraps `LeadList` in `<Suspense>`.
+  - `app-header.tsx`: logo and the blue "+ Add New Lead" button (disabled, with a "Coming soon" tooltip until the Add Lead modal exists).
+- `components/leads/`: the lead list, split into small files.
+  - `lead-list.tsx` is the container (filters + `useLeads` + `useNow` + `groupLeads`).
+  - Also `lead-toolbar.tsx`, `lead-section.tsx`, `lead-card.tsx`, `lead-status-badge.tsx`, `lead-follow-up-chip.tsx`, `lead-list-skeleton.tsx`, `lead-list-states.tsx` (error and empty states).
+- `hooks/`
+  - React Query: `use-leads.ts` (`useLeads`), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`).
+  - UI: `use-lead-filters.ts` (status + search, synced to the URL), `use-now.ts` (current time, refreshed every 60 s), `use-debounced-value.ts`.
+- `lib/dates.ts`: pure date logic (`formatTimeAgo`, `isFollowUpToday`, `isFollowUpOverdue`, `formatFollowUp`, `formatTime`). There is no React here, and every relative function takes `now`.
+- `lib/lead-groups.ts`: `groupLeads(leads, now)` returns `{ today, others }`.
+- `test/lead-factory.ts`: test-only helpers (`makeLead`, `istToApi`).
 - `lib/api/`: `client.ts` (`apiFetch<T>`, `ApiError`), `leads.ts`, `discussions.ts`
 - `lib/types.ts`: TypeScript mirrors of the backend schemas (snake_case, datetimes as ISO strings). Keep them in sync with `backend/app/schemas/`.
 - `lib/lead-status.ts`: status order, labels, badge classes, `isClosedStatus()`
@@ -197,7 +207,32 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
   - Creating a discussion invalidates that lead's discussions, all lead lists, and the lead's detail.
 - **Toasts:** hooks never show toasts; components decide.
 - **Query defaults** (in `providers.tsx`): `staleTime` 30 s, `retry: 1` for queries, no retry for mutations, refetch on window focus. `useLeads` uses `keepPreviousData` so filtering and searching never flash an empty list.
-- **Dates:** "today" and "overdue" are computed on the frontend in the user's local timezone (see Business rules). Use date-fns.
+- **Dates:** "today" and "overdue" are computed on the frontend in the user's local timezone (see Business rules). Use date-fns, and keep date logic in `lib/dates.ts` as pure functions that take `now`. Components get `now` from `useNow()`.
+
+### Lead list rules
+
+- **Today:** `isFollowUpToday` is true when `follow_up_at` falls on the same local calendar day as `now`. It's always false for won/lost (`isClosedStatus`).
+- **Overdue:** `isFollowUpOverdue` is true when `follow_up_at < now`. It's always false for won/lost. A follow-up earlier today is BOTH today and overdue.
+- **Grouping:** `groupLeads` puts every lead in exactly one group.
+  - `today`: today's follow-ups sorted by `follow_up_at` ASC, so the ones already due come first.
+  - `others`: everything else, in API order (most recent activity first).
+  - Sections render as "TODAY'S FOLLOW-UPS · n" then "ALL LEADS · n". An empty section is not rendered.
+- **Card styling** (by precedence):
+  1. Overdue (in either section): red left border, very light red background, red chip "Overdue · due …".
+  2. Today and not yet due: light blue background, blue border, blue chip "Follow-up today at 2:00 PM".
+  3. Future follow-up: gray chip "Follow-up Thu, 15 Oct at 10:30 AM".
+  4. Won/lost: faded (opacity 60%) and never show a follow-up chip.
+- **Selection:** every card is a `<button>` that calls `onSelect(lead.id)`.
+- **Live time:** `useNow()` re-renders every 60 s, so relative times, today and overdue update without a refresh, including across midnight.
+- **URL params:**
+  - `?status=<lead status>&q=<search>`. The URL is read once on load, and every change is written back with `router.replace(…, { scroll: false })`, so there are no new history entries.
+  - Invalid `status` values are ignored and removed. The search is debounced 300 ms and trimmed.
+  - `useLeadFilters` uses `useSearchParams`, so `LeadList` must stay inside `<Suspense>`. With Cache Components, anything reading the URL or the current time during render needs a Suspense boundary, otherwise the build fails.
+- **States:**
+  - The skeleton shows on the first load.
+  - Later refetches keep the previous results (`keepPreviousData`) and show a small spinner next to the section counts.
+  - Errors show the `ApiError` message with a Retry button.
+  - The empty state reads "No leads yet" with no filters, or "No leads match your filters" with a "Clear filters" button.
 
 ### Commands (run from `frontend/`)
 
@@ -208,6 +243,7 @@ npm run lint           # ESLint (eslint-config-next)
 npx tsc --noEmit       # type check
 npm run format         # Prettier (+ Tailwind class sorting) over src/
 npm run format:check   # verify formatting
+npm test               # Vitest unit tests (src/**/*.test.ts); TZ is pinned to Asia/Kolkata in vitest.config.mts
 ```
 
 ### Environment
