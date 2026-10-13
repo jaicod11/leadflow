@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+# Every connection uses UTC so timestamps come back from Postgres as UTC-aware datetimes.
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args={"options": "-c timezone=utc"},
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 

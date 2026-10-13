@@ -29,7 +29,7 @@ LeadFlow is a single-screen CRM (a lightweight lead management tool). A sales re
 - **Deploy targets:** Vercel (frontend), Render (backend), Neon (Postgres).
 - ALL config must come from environment variables. Nothing environment-specific may be hardcoded.
 
-## Data model (planned)
+## Data model
 
 - **Lead**
   - `id`: int PK
@@ -54,35 +54,80 @@ LeadFlow is a single-screen CRM (a lightweight lead management tool). A sales re
 - "Today's follow-ups" and "overdue" are computed on the FRONTEND in the user's local timezone.
 - Leads with status `won` or `lost` are never pinned or marked overdue.
 
-## API conventions
+## API
 
-All routes are under the `/api` prefix.
+All routes are under the `/api` prefix (interactive docs at `/docs`).
 
-Planned endpoints:
+- **Datetimes:** responses are UTC ISO 8601 with an explicit offset, e.g. `2026-10-14T10:00:00+00:00`. Request datetimes must carry a timezone offset; naive values get a 422. DB connections run with `timezone=utc`.
+- **CORS:** origins come from `CORS_ORIGINS`. Allowed methods are GET, POST, PATCH and OPTIONS.
 
-| Method | Path | Notes |
+### Endpoints
+
+| Method | Path | Body | Success | Errors |
+| --- | --- | --- | --- | --- |
+| GET | `/api/health` | — | 200 `{"status":"ok","database":"ok"}` | 503 `{"status":"error","database":"unreachable"}` |
+| GET | `/api/leads?status=&search=` | — | 200 `LeadRead[]` | 422 (e.g. invalid `status`) |
+| POST | `/api/leads` | `LeadCreate` | 201 `LeadRead` | 422 |
+| GET | `/api/leads/{lead_id}` | — | 200 `LeadRead` | 404, 422 |
+| PATCH | `/api/leads/{lead_id}` | `LeadUpdate` | 200 `LeadRead` | 400 (empty body), 404, 422 |
+| GET | `/api/leads/{lead_id}/discussions` | — | 200 `DiscussionRead[]`, newest first | 404, 422 |
+| POST | `/api/leads/{lead_id}/discussions` | `DiscussionCreate` | 201 `DiscussionRead` | 400 (follow-up in the past), 404, 422 |
+
+There is no DELETE endpoint and no pagination; both are out of scope.
+
+### Payloads
+
+- **`LeadCreate`**
+  - `name`: required, trimmed, 1–120 chars.
+  - `company`: optional, trimmed, `""` becomes `null`, max 120.
+  - `phone`: optional, trimmed, `""` becomes `null`, max 32. Only digits, spaces and `+ - ( ) .` are allowed.
+  - There is no `status` field; new leads are always `new`.
+- **`LeadUpdate`** (partial; only the fields sent are applied, using `exclude_unset`)
+  - `name`, `company`, `phone`: same rules as `LeadCreate`.
+  - `status`: a `LeadStatus` value.
+  - `follow_up_at`: a timezone-aware datetime, or `null` to clear it.
+  - `name` and `status` cannot be `null`.
+  - `{}` returns 400 `"No fields to update"`.
+- **`LeadRead`**: `id, name, company, phone, status, follow_up_at, created_at, updated_at, last_note, last_discussion_at`. The last two come from the lead's most recent discussion and are `null` if it has none.
+- **`DiscussionCreate`**
+  - `note`: required, trimmed, 1–5000 chars.
+  - `follow_up_at`: optional and timezone-aware. More than 60 s in the past returns 400 `"Follow-up time must be in the future"`.
+- **`DiscussionRead`**: `id, lead_id, note, follow_up_at, created_at`.
+
+### Behavior
+
+- **Lead list:** built with ONE query. The latest discussion comes from a `LEFT JOIN LATERAL` subquery, so there are no N+1 queries.
+  - Sorted by `COALESCE(last_discussion_at, created_at) DESC, id DESC`.
+  - `search` is trimmed and matched as a case-insensitive substring of `name` (ILIKE). `%`, `_` and `\` are escaped; a blank search means no filter.
+- **Discussion order:** "newest first" is always `created_at DESC, id DESC`. This applies to queries and to the `Lead.discussions` relationship.
+- **Creating a discussion:** one transaction inserts the discussion, sets `lead.follow_up_at` if `follow_up_at` was given, and bumps `lead.updated_at`. It never changes the lead's status.
+
+### Errors
+
+| Status | When | Body |
 | --- | --- | --- |
-| GET | `/api/health` | |
-| GET | `/api/leads?status=&search=` | each lead includes `last_note` and `last_discussion_at` |
-| POST | `/api/leads` | 201 |
-| GET | `/api/leads/{id}` | 200 / 404 |
-| PATCH | `/api/leads/{id}` | 200 / 404 |
-| GET | `/api/leads/{id}/discussions` | newest first |
-| POST | `/api/leads/{id}/discussions` | 201 |
+| 400 | Business rule violated (`BusinessRuleError`) | `{"detail": "..."}` |
+| 404 | Missing resource (`NotFoundError`) | `{"detail": "Lead not found"}` |
+| 422 | Request validation failed | `{"detail": "Validation failed", "errors": [{"field": "name", "message": "..."}]}` |
+| 500 | Unhandled exception | `{"detail": "Internal server error"}` (traceback logged server-side only) |
 
-- Status codes: 201 for creates, 404 for missing resources, 422 for validation errors, 400 for business-rule violations.
-- Every error returns JSON in the form `{"detail": "..."}`. Never leak stack traces.
-- Routes stay thin. DB logic lives in a service/crud layer.
+- In 422 errors, `field` is the dotted location without the `body`/`query`/`path` prefix. Invalid JSON is reported as `field: "body"`. Messages are human readable, for display next to form fields.
+- Services raise `NotFoundError` / `BusinessRuleError` from `app/core/exceptions.py`. They never build HTTP responses.
+- Routes stay thin: they call one service function. DB logic lives in `app/services/`.
+- Every route declares `response_model`, `status_code`, a tag (`health`, `leads`, `discussions`) and a `summary`. Error responses are documented with the specs in `app/api/responses.py`.
 
 ### Backend layout
 
-- `app/core/` — settings (`config.py`)
-- `app/db/` — declarative base and session/engine
-- `app/models/` — SQLAlchemy ORM models
-- `app/schemas/` — Pydantic request/response schemas
-- `app/services/` — DB/business logic (service/crud layer)
-- `app/api/routes/` — thin FastAPI routers
-- `app/main.py` — FastAPI app, middleware, health check
+- `app/core/`: settings (`config.py`), exceptions and their handlers (`exceptions.py`)
+- `app/db/`: declarative base and session/engine
+- `app/models/`: SQLAlchemy ORM models
+- `app/schemas/`: Pydantic request/response schemas (`common.py` holds the shared `UtcDatetime`)
+- `app/services/`: DB/business logic (`lead_service.py`, `discussion_service.py`)
+- `app/api/routes/`: thin routers (`health.py`, `leads.py`, `discussions.py`)
+- `app/api/router.py`: aggregates the routers
+- `app/api/deps.py`: the `DbSession` dependency
+- `app/api/responses.py`: OpenAPI error-response specs
+- `app/main.py`: FastAPI app, CORS, exception handlers, and the `/api` mount
 
 ## Coding conventions
 

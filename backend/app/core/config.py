@@ -33,4 +33,4 @@ class Settings(BaseSettings):
         return value
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]  # required fields are read from the environment
