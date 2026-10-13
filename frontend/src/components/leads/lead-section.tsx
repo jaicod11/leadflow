@@ -12,6 +12,8 @@ interface LeadSectionProps {
   onSelect: (leadId: number) => void;
   /** Shows a small spinner next to the count while the list refetches in the background. */
   isRefreshing: boolean;
+  /** A just-created lead whose card briefly shows a highlight ring. */
+  highlightedLeadId: number | null;
 }
 
 /** A titled group of lead cards, e.g. "TODAY'S FOLLOW-UPS · 3". Not rendered when empty. */
@@ -22,6 +24,7 @@ export function LeadSection({
   now,
   onSelect,
   isRefreshing,
+  highlightedLeadId,
 }: LeadSectionProps) {
   const headingId = useId();
   if (leads.length === 0) return null;
@@ -46,7 +49,12 @@ export function LeadSection({
       <ul className="space-y-3">
         {leads.map((lead) => (
           <li key={lead.id}>
-            <LeadCard lead={lead} now={now} onSelect={onSelect} />
+            <LeadCard
+              lead={lead}
+              now={now}
+              onSelect={onSelect}
+              isHighlighted={lead.id === highlightedLeadId}
+            />
           </li>
         ))}
       </ul>

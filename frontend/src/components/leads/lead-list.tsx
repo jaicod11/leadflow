@@ -1,6 +1,7 @@
 "use client";
 
 import { Pin, Users } from "lucide-react";
+import { useEffect, useImperativeHandle, useState, type Ref } from "react";
 
 import { LeadListSkeleton } from "@/components/leads/lead-list-skeleton";
 import {
@@ -13,14 +14,24 @@ import { LeadToolbar } from "@/components/leads/lead-toolbar";
 import { useLeadFilters } from "@/hooks/use-lead-filters";
 import { useLeads } from "@/hooks/use-leads";
 import { useNow } from "@/hooks/use-now";
+import { matchesLeadFilters } from "@/lib/lead-filters";
 import { groupLeads } from "@/lib/lead-groups";
+import type { Lead } from "@/lib/types";
+
+const HIGHLIGHT_DURATION_MS = 2000;
+
+export interface LeadListHandle {
+  /** Make a (new) lead visible: clear filters that would hide it, scroll to its card, highlight it. */
+  reveal: (lead: Lead) => void;
+}
 
 interface LeadListProps {
   onSelect: (leadId: number) => void;
+  ref?: Ref<LeadListHandle>;
 }
 
 /** Toolbar + today's follow-ups + all other leads. Reads the URL, so render it inside <Suspense>. */
-export function LeadList({ onSelect }: LeadListProps) {
+export function LeadList({ onSelect, ref }: LeadListProps) {
   const filters = useLeadFilters();
   const now = useNow();
   const {
@@ -30,6 +41,38 @@ export function LeadList({ onSelect }: LeadListProps) {
     isFetching,
     refetch,
   } = useLeads({ status: filters.status, search: filters.search });
+  const [highlightedLeadId, setHighlightedLeadId] = useState<number | null>(
+    null,
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      reveal(lead) {
+        const { status, search, clearFilters } = filters;
+        if (!matchesLeadFilters(lead, { status, search })) clearFilters();
+        setHighlightedLeadId(lead.id);
+      },
+    }),
+    [filters],
+  );
+
+  // Once the highlighted lead's card is on screen (after any filter reset and refetch),
+  // scroll it into view, then drop the highlight after the fade-out animation.
+  const isHighlightedLeadShown =
+    highlightedLeadId !== null &&
+    (leads?.some((lead) => lead.id === highlightedLeadId) ?? false);
+  useEffect(() => {
+    if (!isHighlightedLeadShown) return;
+    document
+      .querySelector(`[data-lead-id="${highlightedLeadId}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timeout = window.setTimeout(
+      () => setHighlightedLeadId(null),
+      HIGHLIGHT_DURATION_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [isHighlightedLeadShown, highlightedLeadId]);
 
   const retry = () => void refetch();
   // Background refetch (filter/search change, window focus) while results are already on screen.
@@ -66,6 +109,7 @@ export function LeadList({ onSelect }: LeadListProps) {
           now={now}
           onSelect={onSelect}
           isRefreshing={isRefreshing}
+          highlightedLeadId={highlightedLeadId}
         />
         <LeadSection
           title="All leads"
@@ -74,6 +118,7 @@ export function LeadList({ onSelect }: LeadListProps) {
           now={now}
           onSelect={onSelect}
           isRefreshing={isRefreshing}
+          highlightedLeadId={highlightedLeadId}
         />
       </>
     );

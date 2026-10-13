@@ -1,13 +1,8 @@
 import { Plus, TrendingUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
-export function AppHeader() {
+export function AppHeader({ onAddLead }: { onAddLead: () => void }) {
   return (
     <header className="border-b bg-white">
       <div className="mx-auto flex h-16 max-w-4xl items-center justify-between gap-4 px-4 sm:px-6">
@@ -17,25 +12,10 @@ export function AppHeader() {
           </span>
           <span className="text-lg font-semibold tracking-tight">LeadFlow</span>
         </div>
-
-        <Tooltip>
-          <TooltipTrigger asChild>
-            {/* A disabled button ignores pointer events, so this wrapper receives hover/focus for the tooltip. */}
-            <span
-              tabIndex={0}
-              className="rounded-lg outline-none focus-visible:ring-[3px] focus-visible:ring-blue-500/50"
-            >
-              <Button
-                disabled
-                className="bg-blue-600 text-white hover:bg-blue-700"
-              >
-                <Plus aria-hidden />
-                Add New Lead
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>Coming soon</TooltipContent>
-        </Tooltip>
+        <Button variant="brand" onClick={onAddLead}>
+          <Plus aria-hidden />
+          Add New Lead
+        </Button>
       </div>
     </header>
   );

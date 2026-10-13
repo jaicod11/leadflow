@@ -9,6 +9,8 @@ interface LeadCardProps {
   lead: Lead;
   now: Date;
   onSelect: (leadId: number) => void;
+  /** Plays a short fading ring (see --animate-lead-highlight in globals.css). */
+  isHighlighted?: boolean;
 }
 
 // Overdue takes precedence over today; closed (won/lost) leads are never today or overdue.
@@ -20,7 +22,12 @@ const TONE_CLASSES = {
   default: "bg-white hover:bg-neutral-50",
 } as const;
 
-export function LeadCard({ lead, now, onSelect }: LeadCardProps) {
+export function LeadCard({
+  lead,
+  now,
+  onSelect,
+  isHighlighted = false,
+}: LeadCardProps) {
   const tone = isFollowUpOverdue(lead, now)
     ? "overdue"
     : isFollowUpToday(lead, now)
@@ -31,10 +38,12 @@ export function LeadCard({ lead, now, onSelect }: LeadCardProps) {
     <button
       type="button"
       onClick={() => onSelect(lead.id)}
+      data-lead-id={lead.id}
       className={cn(
         "block w-full rounded-xl border p-4 text-left shadow-xs transition-[background-color,box-shadow,opacity] outline-none hover:shadow-md focus-visible:ring-[3px] focus-visible:ring-blue-500/50",
         TONE_CLASSES[tone],
         isClosedStatus(lead.status) && "opacity-60 hover:opacity-80",
+        isHighlighted && "animate-lead-highlight",
       )}
     >
       <span className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5">

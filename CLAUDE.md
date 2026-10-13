@@ -179,11 +179,12 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
 - `app/`: `layout.tsx` (metadata, fonts, `<Providers>`), `page.tsx` (the single screen), `providers.tsx` (QueryClient, TooltipProvider, Toaster, dev-only React Query Devtools), `globals.css` (Tailwind + shadcn theme)
 - `components/ui/`: shadcn components (button, badge, dialog, input, textarea, label, select, checkbox, skeleton, separator, scroll-area, tooltip, sonner). Add more with `npx shadcn@latest add <name>`, then run `npm run format`. There is no calendar/date-picker; follow-ups use native `<input type="date">` and `<input type="time">`.
 - `components/`
-  - `leads-screen.tsx`: client wrapper for the single screen. It holds UI state shared with the dialogs (`selectedLeadId`) and wraps `LeadList` in `<Suspense>`.
-  - `app-header.tsx`: logo and the blue "+ Add New Lead" button (disabled, with a "Coming soon" tooltip until the Add Lead modal exists).
+  - `leads-screen.tsx`: client wrapper for the single screen. It holds the dialog state (`selectedLeadId` for the timeline, `isAddLeadOpen`), and it wraps `LeadList` in `<Suspense>`.
+  - `app-header.tsx`: logo and the blue "+ Add New Lead" button (`variant="brand"`), which opens the Add Lead dialog.
 - `components/leads/`: the lead list, split into small files.
-  - `lead-list.tsx` is the container (filters + `useLeads` + `useNow` + `groupLeads`).
+  - `lead-list.tsx` is the container (filters + `useLeads` + `useNow` + `groupLeads`). It also exposes a `reveal(lead)` handle through `ref`.
   - Also `lead-toolbar.tsx`, `lead-section.tsx`, `lead-card.tsx`, `lead-status-badge.tsx`, `lead-follow-up-chip.tsx`, `lead-list-skeleton.tsx`, `lead-list-states.tsx` (error and empty states).
+  - `add-lead-dialog.tsx`: the Add New Lead modal. See "Add Lead dialog" below.
 - `components/leads/timeline/`: the lead timeline dialog. See "Timeline dialog" below.
 - `hooks/`
   - React Query: `use-leads.ts` (`useLeads`), `use-lead.ts` (`useLead`, seeded from cached lists), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`).
@@ -192,6 +193,12 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
   - `formatFollowUp(iso, now, { midSentence: true })` lowercases "today/tomorrow/yesterday" for use mid-sentence, e.g. "Overdue · due yesterday at 11:00 AM". Without the option they are capitalized.
 - `lib/lead-groups.ts`: `groupLeads(leads, now)` returns `{ today, others }`.
 - `lib/follow-up-form.ts`: pure helpers for the native date/time inputs: `getDefaultFollowUp(now)`, `toFollowUpIso(date, time)`, `validateFollowUp(date, time, now)`.
+- `lib/lead-form.ts`: `validateLeadForm` / `toLeadCreate`. They mirror the backend `LeadCreate` rules and messages exactly, so keep them in sync with `backend/app/schemas/lead.py`.
+  - Lengths are counted in code points, like Python.
+  - The phone length is checked before its characters.
+  - A blank name gives "This field cannot be empty".
+- `lib/lead-filters.ts`: `matchesLeadFilters(lead, { status, search })` mirrors the API's filtering.
+- `components/ui/button.tsx` has an extra `brand` variant (blue) for LeadFlow's call-to-action buttons.
 - `test/lead-factory.ts`: test-only helpers (`makeLead`, `istToApi`).
 - `lib/api/`: `client.ts` (`apiFetch<T>`, `ApiError`), `leads.ts`, `discussions.ts`
 - `lib/types.ts`: TypeScript mirrors of the backend schemas (snake_case, datetimes as ISO strings). Keep them in sync with `backend/app/schemas/`.
@@ -259,6 +266,20 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
   - On success the form resets, focus returns to the textarea, and the dialog stays open.
 - **Data:** `useLead(id)` uses `initialData` from any cached lead list (so the header renders instantly) and still refetches in the background. `useCreateDiscussion` / `useUpdateLead` invalidation updates the timeline, the header and the list behind the dialog.
 - **Load failure:** if the lead fails to load (or returns 404, even when a cached copy exists), the dialog shows the error with a Close button.
+
+### Add Lead dialog (`components/leads/add-lead-dialog.tsx`)
+
+- **Fields:** "Full Name *" (red asterisk), "Company (Optional)" and "Phone (Optional)" (`type="tel"`). The footer has Cancel (ghost) and Save Lead (`brand`).
+- **Fresh form each time:** the form lives inside `DialogContent`, which unmounts on close. Every open starts empty with no errors, and Radix focuses Full Name.
+- **Submit (button or Enter):**
+  - `validateLeadForm` runs first. Errors appear inline with `aria-invalid`, the first invalid field is focused, and nothing is sent.
+  - While saving, inputs and buttons are disabled, Save shows a spinner, and Esc/overlay/× are ignored.
+  - Server `fieldErrors` map to the fields, and the first one is focused once saving ends. Any other error shows in a red alert above the footer. Typed values are never lost.
+- **On success,** `LeadsScreen.handleLeadCreated`:
+  - closes the dialog;
+  - calls `leadListRef.current.reveal(lead)`. If the active filters would hide the lead (`matchesLeadFilters`), it clears them (status All, empty search, so the URL params go too), then scrolls the card into view and plays a 2 s fading ring (`animate-lead-highlight`, defined in `globals.css` `@theme`, on `[data-lead-id]`);
+  - toasts "Lead added" with a "Log discussion" action that sets `selectedLeadId`, opening the timeline.
+- **Dev-server gotcha:** if a change to `@theme` in `globals.css` doesn't show up in `npm run dev`, stop the dev server and delete `frontend/.next/dev`. Turbopack's persistent dev cache can keep the old CSS.
 
 ### Commands (run from `frontend/`)
 
