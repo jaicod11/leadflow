@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     CORS_ORIGINS: Annotated[list[str], NoDecode]
     ENVIRONMENT: str = "development"
 
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def use_psycopg_driver(cls, value: str) -> str:
+        # Render and Neon hand out driverless URLs, which SQLAlchemy maps to psycopg2.
+        for scheme in ("postgres://", "postgresql://"):
+            if value.startswith(scheme):
+                return "postgresql+psycopg://" + value.removeprefix(scheme)
+        return value
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def split_cors_origins(cls, value: str | list[str]) -> list[str]:

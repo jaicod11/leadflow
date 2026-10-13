@@ -2,6 +2,8 @@
 
 I make ALL git commits myself. You must NEVER run any git command that changes the repository, staging area, or history. That includes: git add, git commit, git push, git pull, git reset, git restore, git checkout, git switch, git stash, git rebase, git merge, git rm, git mv, git tag, git branch -d/-D, git init, git clean.
 
+Never use git -C (e.g. git -C <path> commit); it is denied entirely because it would bypass the deny list. Always run git from the repo root instead.
+
 You MAY run read-only commands: git status, git diff, git log.
 
 At the end of EVERY task, instead of committing, give me a suggested commit message in Conventional Commits format (e.g. "feat(api): add leads CRUD endpoints").
@@ -107,6 +109,24 @@ docker compose up -d db --wait            # Postgres 16 on localhost:5433
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env                      # if .env does not exist yet
+.venv/bin/alembic upgrade head            # apply migrations
 .venv/bin/uvicorn app.main:app --reload --port 8000
 curl http://localhost:8000/api/health
+```
+
+## Migrations
+
+Alembic lives in `backend/alembic` (config: `backend/alembic.ini`). The DB URL comes from `settings.DATABASE_URL`, never from `alembic.ini`. Run these from `backend/`:
+
+```bash
+# Create a migration after changing models (models must be imported in app/models/__init__.py)
+.venv/bin/alembic revision --autogenerate -m "short description"
+# ALWAYS read and fix the generated file before applying it
+# (e.g. autogenerate duplicates the CHECK constraint of non-native Enums).
+
+.venv/bin/alembic upgrade head      # apply all migrations
+.venv/bin/alembic downgrade -1      # roll back the last migration
+.venv/bin/alembic downgrade base    # roll back everything
+.venv/bin/alembic current           # show the applied revision
+.venv/bin/alembic check             # fail if models and DB have drifted
 ```
