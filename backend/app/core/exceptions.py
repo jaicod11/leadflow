@@ -1,4 +1,3 @@
-import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -7,8 +6,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.schemas.errors import ErrorResponse, FieldError, ValidationErrorResponse
-
-logger = logging.getLogger(__name__)
 
 # Request locations FastAPI prefixes to error paths; clients only care about the field itself.
 _LOCATION_PREFIXES = {"body", "query", "path", "header", "cookie"}
@@ -65,9 +62,3 @@ def register_exception_handlers(app: FastAPI) -> None:
             errors=[_to_field_error(error) for error in exc.errors()],
         )
         return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content=body.model_dump())
-
-    @app.exception_handler(Exception)
-    async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
-        body = ErrorResponse(detail="Internal server error")
-        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=body.model_dump())

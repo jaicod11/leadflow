@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     CORS_ORIGINS: Annotated[list[str], NoDecode]
     ENVIRONMENT: str = "development"
+    SEED_TIMEZONE: str = "Asia/Kolkata"
 
     @field_validator("DATABASE_URL")
     @classmethod

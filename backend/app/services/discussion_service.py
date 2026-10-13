@@ -1,15 +1,9 @@
-from datetime import UTC, datetime, timedelta
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import BusinessRuleError
 from app.models import Discussion
 from app.schemas.discussion import DiscussionCreate
-from app.services.lead_service import require_lead
-
-# Tolerates small clock differences between the browser and the server.
-FOLLOW_UP_GRACE_PERIOD = timedelta(seconds=60)
+from app.services.lead_service import ensure_follow_up_in_future, require_lead
 
 
 def list_discussions(db: Session, lead_id: int) -> list[Discussion]:
@@ -24,8 +18,7 @@ def list_discussions(db: Session, lead_id: int) -> list[Discussion]:
 
 def create_discussion(db: Session, lead_id: int, data: DiscussionCreate) -> Discussion:
     lead = require_lead(db, lead_id)
-    if data.follow_up_at is not None and data.follow_up_at < datetime.now(UTC) - FOLLOW_UP_GRACE_PERIOD:
-        raise BusinessRuleError("Follow-up time must be in the future")
+    ensure_follow_up_in_future(data.follow_up_at)
 
     discussion = Discussion(lead_id=lead.id, note=data.note, follow_up_at=data.follow_up_at)
     db.add(discussion)

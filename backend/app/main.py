@@ -4,9 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.core.middleware import UnhandledErrorMiddleware
 
 app = FastAPI(title="LeadFlow API")
 
+# The middleware added LAST is the outermost, so UnhandledErrorMiddleware runs inside CORS
+# and its 500 responses still get CORS headers.
+app.add_middleware(UnhandledErrorMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

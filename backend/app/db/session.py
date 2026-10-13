@@ -1,16 +1,17 @@
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 
-# Every connection uses UTC so timestamps come back from Postgres as UTC-aware datetimes.
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    connect_args={"options": "-c timezone=utc"},
-)
+
+def create_db_engine(url: str) -> Engine:
+    # Every connection uses UTC so timestamps come back from Postgres as UTC-aware datetimes.
+    return create_engine(url, pool_pre_ping=True, connect_args={"options": "-c timezone=utc"})
+
+
+engine = create_db_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 

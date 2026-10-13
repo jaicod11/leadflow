@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # Any warning attributed to our own code fails the run.
+    'error:::app\.',
+    'error:::tests\.',
+]

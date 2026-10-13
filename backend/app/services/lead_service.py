@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session
 
@@ -6,6 +8,9 @@ from app.models import Discussion, Lead, LeadStatus
 from app.schemas.lead import LeadCreate, LeadRead, LeadUpdate
 
 LEAD_NOT_FOUND = "Lead not found"
+
+# Tolerates small clock differences between the browser and the server.
+FOLLOW_UP_GRACE_PERIOD = timedelta(seconds=60)
 
 # Latest discussion per lead, as a LATERAL subquery so the lead list stays a single query
 # (one index lookup on discussions(lead_id, created_at) per lead, no N+1).
@@ -38,6 +43,12 @@ _LEAD_READ_QUERY = (
 
 def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def ensure_follow_up_in_future(follow_up_at: datetime | None) -> None:
+    """Reject follow-ups more than FOLLOW_UP_GRACE_PERIOD in the past. None (no/cleared follow-up) is allowed."""
+    if follow_up_at is not None and follow_up_at < datetime.now(UTC) - FOLLOW_UP_GRACE_PERIOD:
+        raise BusinessRuleError("Follow-up time must be in the future")
 
 
 def require_lead(db: Session, lead_id: int) -> Lead:
@@ -79,6 +90,8 @@ def update_lead(db: Session, lead_id: int, data: LeadUpdate) -> LeadRead:
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         raise BusinessRuleError("No fields to update")
+    if "follow_up_at" in changes:
+        ensure_follow_up_in_future(changes["follow_up_at"])
     for field, value in changes.items():
         setattr(lead, field, value)
     db.commit()
