@@ -1,14 +1,17 @@
 "use client";
 
+import { Plus } from "lucide-react";
 import { Suspense, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/app-header";
+import { UserMenu } from "@/components/auth/user-menu";
 import { DemoFooter } from "@/components/demo-footer";
 import { AddLeadDialog } from "@/components/leads/add-lead-dialog";
 import { LeadList, type LeadListHandle } from "@/components/leads/lead-list";
 import { LeadListSkeleton } from "@/components/leads/lead-list-skeleton";
 import { LeadTimelineDialog } from "@/components/leads/timeline/lead-timeline-dialog";
+import { Button } from "@/components/ui/button";
 import type { Lead } from "@/lib/types";
 
 /** The single LeadFlow screen. Owns UI state shared by the list and its dialogs. */
@@ -31,7 +34,17 @@ export function LeadsScreen() {
 
   return (
     <>
-      <AppHeader onAddLead={() => setAddLeadOpen(true)} />
+      <AppHeader
+        actions={
+          <>
+            <Button variant="brand" onClick={() => setAddLeadOpen(true)}>
+              <Plus aria-hidden />
+              Add New Lead
+            </Button>
+            <UserMenu />
+          </>
+        }
+      />
       <main className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
         {/* LeadList reads the URL (useSearchParams) and the clock, so it renders on the client. */}
         <Suspense fallback={<LeadListSkeleton />}>

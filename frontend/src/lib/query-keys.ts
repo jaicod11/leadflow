@@ -19,4 +19,8 @@ export const queryKeys = {
     byLead: (leadId: number | null) =>
       [...DISCUSSIONS, "byLead", leadId] as const,
   },
+  auth: {
+    /** The signed-in user (GET /auth/me). */
+    me: ["auth", "me"] as const,
+  },
 };

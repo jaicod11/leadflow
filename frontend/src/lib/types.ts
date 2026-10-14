@@ -58,3 +58,31 @@ export interface DiscussionCreate {
   /** Must include a timezone offset; more than 60 s in the past is rejected (400). */
   follow_up_at?: IsoDateTime | null;
 }
+
+/** backend/app/schemas/auth.py: UserRead */
+export interface User {
+  id: number;
+  email: string;
+  name: string;
+  created_at: IsoDateTime;
+}
+
+/** backend/app/schemas/auth.py: LoginRequest. The email is matched case-insensitively. */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+/** backend/app/schemas/auth.py: RegisterRequest. Name 1–80 (trimmed), password 8–128 (not trimmed). */
+export interface RegisterRequest {
+  email: string;
+  name: string;
+  password: string;
+}
+
+/** backend/app/schemas/auth.py: TokenResponse, returned by both login and register. */
+export interface TokenResponse {
+  access_token: string;
+  token_type: "bearer";
+  user: User;
+}

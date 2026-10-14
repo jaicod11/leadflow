@@ -38,16 +38,16 @@ Screenshots live in [`docs/screenshots/`](docs/screenshots/).
 - [x] Status filter chips
 - [x] Docker Compose for the full stack (Postgres + API + web)
 - [x] Seed script with realistic demo data
+- [x] Login: sign-in and create-account pages, email + password with JWT access tokens, and a one-click demo account (`demo@leadflow.app` / `demo1234`); see [Authentication](#authentication)
 
 **Extras**
 
 - [x] "Mark done" clears a lead's follow-up from the dialog
-- [x] Optional login (API): email + password with JWT access tokens, shared workspace, one-click demo account (`demo@leadflow.app` / `demo1234`); see [Authentication](#authentication)
 - [x] Filters and search are synced to the URL (`?status=qualified&q=pri`), so a refresh or a shared link keeps them
 - [x] Live time: "time ago", today and overdue update every minute without a refresh, including across midnight
 - [x] A newly created lead is scrolled into view and briefly highlighted, and filters that would hide it are cleared
 - [x] Consistent JSON errors with field-level messages, shown inline under form fields
-- [x] Tests: 82 backend (pytest) and 114 frontend (Vitest)
+- [x] Tests: 82 backend (pytest) and 165 frontend (Vitest)
 - [x] GitHub Actions CI for both apps
 - [x] Deployment-ready: Render Blueprint, cold-start friendly frontend (retries + "waking up" notice), and a daily demo reset
 
@@ -79,6 +79,8 @@ docker compose ps        # wait until db, api and web are "healthy"
 ```
 
 No `.env` file is needed. On start-up the API container runs the migrations and seeds the demo data (only if the database is empty).
+
+Open http://localhost:3000 and click **Use demo account** on the sign-in page (`demo@leadflow.app` / `demo1234`), or create your own account.
 
 | What | URL |
 | --- | --- |
@@ -153,7 +155,7 @@ source .venv/bin/activate
 pytest -v
 ```
 
-**Frontend:** 114 unit tests (Vitest) for the pure date, grouping, follow-up, lead-form, retry and demo-mode logic, with the timezone pinned to Asia/Kolkata. Plus lint, types, formatting and a production build:
+**Frontend:** 165 unit tests (Vitest) for the pure date, grouping, follow-up, lead-form, retry and demo-mode logic, the auth helpers (token storage, safe redirects, login/register validation) and the API client's auth handling (mocked `fetch`), with the timezone pinned to Asia/Kolkata. Plus lint, types, formatting and a production build:
 
 ```bash
 cd frontend
@@ -196,10 +198,10 @@ The reset workflow also needs two **GitHub repository secrets**, `DEMO_API_URL` 
 LeadFlow/
 ├── backend/
 │   ├── app/
-│   │   ├── api/routes/      # thin FastAPI routers: health, leads, discussions
+│   │   ├── api/routes/      # thin FastAPI routers: health, auth, leads, discussions, demo
 │   │   ├── core/            # settings, exceptions + handlers, 500 middleware
 │   │   ├── db/              # declarative base, engine/session
-│   │   ├── models/          # Lead, Discussion (SQLAlchemy)
+│   │   ├── models/          # User, Lead, Discussion (SQLAlchemy)
 │   │   ├── schemas/         # Pydantic request/response models
 │   │   ├── services/        # all DB and business logic
 │   │   ├── main.py          # FastAPI app
@@ -210,8 +212,8 @@ LeadFlow/
 │   └── docker-entrypoint.sh # migrate, optional seed, uvicorn
 ├── frontend/
 │   ├── src/
-│   │   ├── app/             # layout, page, providers
-│   │   ├── components/      # lead list, timeline + add-lead dialogs, shadcn/ui
+│   │   ├── app/             # layout, providers, pages: / (leads), /login, /register
+│   │   ├── components/      # auth (provider, route guard, forms, user menu), lead list, dialogs, shadcn/ui
 │   │   ├── hooks/           # React Query and UI hooks
 │   │   └── lib/             # API client, types, pure date/grouping/form logic (+ Vitest tests)
 │   └── Dockerfile
@@ -280,6 +282,17 @@ Login is optional in the assignment, and LeadFlow implements it as **email + pas
   - Login answers an unknown email exactly like a wrong password. For unknown emails it still verifies against a dummy hash, so response times don't reveal which accounts exist.
 - **Shared workspace:** every logged-in user sees and edits the same leads; there is no `owner_id`. Authentication gates *access* rather than splitting data, which suits a small sales team and keeps the demo simple.
 
+**In the web app**
+
+- **Pages:** `/login` (Sign in) and `/register` (Create account). The sign-in page shows the demo credentials and a **Use demo account** button that fills them in and signs in.
+  - Forms are validated in the browser first, with the same rules as the API (email format; name 1–80 characters; password 8–128 characters).
+  - A wrong password shows "Invalid email or password", keeps the email and clears the password. A taken email shows "An account with this email already exists" under the Email field.
+- **Session:** the token is stored in `localStorage` (`leadflow.token`) and sent as `Authorization: Bearer …` on every API call. On page load, `GET /api/auth/me` checks it before any lead data is shown.
+- **Protected screen:** the leads screen is guarded on the client (the app is client-rendered; the API enforces auth on every request). A signed-out visitor is sent to `/login?next=<the page they asked for>`, and lands back there (filters included) after signing in.
+  - `next` is only followed if it is a same-site path (it must start with a single `/`), so `?next=https://evil.com` can't turn the login page into an open redirect.
+- **Expiry:** any 401 from the API (other than a failed login) means the token has expired or is invalid. The app then signs out, clears all cached data, and returns to the sign-in page with "Your session expired. Please sign in again."
+- **Log out:** from the avatar menu in the header. It removes the token and clears every cached lead from memory, so the Back button can't bring the data back. Signing out in one tab signs out the other open tabs too.
+
 **Why Bearer tokens instead of cookies?**
 - The frontend (Vercel) and the API (Render) are on different domains, so a session cookie would be a *third-party* cookie, which Safari and Brave block (and Chrome restricts).
 - A header token works in every browser, needs no CSRF protection (browsers never attach it automatically), and makes `/docs` and `curl` easy to use.
@@ -311,12 +324,14 @@ This project was built with AI assistance:
 
 ## Known limitations & future work
 
-- **Login screen:** the API side of authentication is done; the frontend login screen comes next. Until then the web app gets 401s from the API.
-- **Token revocation:** access tokens can't be revoked before they expire (7 days); there is no logout on the server or refresh-token rotation.
+- **Token in `localStorage`:** any script running on the page can read it, so an XSS bug would expose it. The safer setup is an `httpOnly` cookie set through a same-origin proxy (for example Next.js route handlers forwarding `/api` to Render), so the cookie stays first-party. That needs an extra network hop and CSRF protection, so it was left for later.
+- **No server-side token revocation:** access tokens can't be revoked before they expire (7 days). Logging out only deletes the token in the browser; there is no denylist or refresh-token rotation.
+- **No password reset** and no email verification.
+- **No login rate limiting:** repeated wrong passwords are not throttled or locked out.
 - **Pagination:** the list loads every lead at once, which is fine for hundreds of leads but not thousands.
 - **Delete / archive:** leads and discussions can't be removed yet.
 - **Reminders and notifications:** follow-ups are only visible in the app (no email or push).
-- **Multi-user ownership:** there are no users, so leads have no owner or assignee.
+- **Shared workspace:** every user sees and edits every lead; leads have no owner or assignee, and there are no roles.
 
 ## Deployment
 

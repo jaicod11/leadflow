@@ -13,5 +13,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // lib/env.ts requires it; the API client tests never reach this host (fetch is mocked).
+    env: { NEXT_PUBLIC_API_URL: "http://api.test/api" },
   },
 });

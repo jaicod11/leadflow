@@ -8,6 +8,7 @@ import {
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import type { ReactNode } from "react";
 
+import { AuthProvider } from "@/components/auth/auth-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryRetryDelay, shouldRetryQuery } from "@/lib/query-retry";
@@ -39,7 +40,9 @@ function getQueryClient(): QueryClient {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={getQueryClient()}>
-      <TooltipProvider>{children}</TooltipProvider>
+      <AuthProvider>
+        <TooltipProvider>{children}</TooltipProvider>
+      </AuthProvider>
       <Toaster />
       {process.env.NODE_ENV === "development" && (
         <ReactQueryDevtools initialIsOpen={false} />

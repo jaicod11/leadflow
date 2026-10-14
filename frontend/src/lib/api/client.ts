@@ -1,7 +1,21 @@
 import { ApiError } from "@/lib/api/errors";
+import { getToken } from "@/lib/auth/token-storage";
 import { env } from "@/lib/env";
 
 const NETWORK_ERROR_MESSAGE = "Can't reach the server. Is the API running?";
+
+// A 401 from these means "wrong credentials" (shown on the form), not "your session is over".
+const CREDENTIAL_PATHS = new Set(["/auth/login", "/auth/register"]);
+
+let unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * Called on a 401 from any endpoint except login/register (before the ApiError is thrown).
+ * The auth provider registers it; a setter instead of an import keeps the modules free of cycles.
+ */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
 
 type QueryParams = Record<string, string | number | null | undefined>;
 
@@ -18,6 +32,7 @@ export async function apiFetch<T>(
   path: string,
   { method = "GET", body, query, signal }: ApiFetchOptions = {},
 ): Promise<T> {
+  const token = getToken();
   let response: Response;
   try {
     response = await fetch(buildUrl(path, query), {
@@ -25,6 +40,7 @@ export async function apiFetch<T>(
       headers: {
         Accept: "application/json",
         ...(body !== undefined && { "Content-Type": "application/json" }),
+        ...(token && { Authorization: `Bearer ${token}` }),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal,
@@ -34,6 +50,8 @@ export async function apiFetch<T>(
     throw new ApiError(0, NETWORK_ERROR_MESSAGE);
   }
 
+  if (response.status === 401 && !CREDENTIAL_PATHS.has(path))
+    unauthorizedHandler?.();
   if (!response.ok) throw await toApiError(response);
   if (response.status === 204) return undefined as T;
   try {

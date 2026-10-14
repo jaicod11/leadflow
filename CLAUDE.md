@@ -182,7 +182,7 @@ There is no DELETE endpoint and no pagination; both are out of scope.
 
 - Do ONLY what the current prompt asks. Do not add unrequested features.
 - If something is ambiguous, ASK me before assuming.
-- Do not add authentication unless I explicitly ask (optional login may come at the very end).
+- Login exists (backend + frontend, see the Authentication sections). Do not extend it (roles, per-user data, password reset, rate limiting, cookies) unless I explicitly ask.
 - At the end of every task, report:
   1. files created/changed,
   2. how to run/verify,
@@ -285,18 +285,19 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
 
 ### Folder structure (`frontend/src/`)
 
-- `app/`: `layout.tsx` (metadata, fonts, `<Providers>`), `page.tsx` (the single screen), `providers.tsx` (QueryClient, TooltipProvider, Toaster, dev-only React Query Devtools), `globals.css` (Tailwind + shadcn theme)
-- `components/ui/`: shadcn components (button, badge, dialog, input, textarea, label, select, checkbox, skeleton, separator, scroll-area, tooltip, sonner). Add more with `npx shadcn@latest add <name>`, then run `npm run format`. There is no calendar/date-picker; follow-ups use native `<input type="date">` and `<input type="time">`.
+- `app/`: `layout.tsx` (metadata, fonts, `<Providers>`), `page.tsx` (the leads screen inside `<RequireAuth>`), `login/page.tsx` and `register/page.tsx` (see "Authentication (frontend)"), `providers.tsx` (QueryClient, AuthProvider, TooltipProvider, Toaster, dev-only React Query Devtools), `globals.css` (Tailwind + shadcn theme)
+- `components/ui/`: shadcn components (button, badge, dialog, dropdown-menu, input, textarea, label, select, checkbox, skeleton, separator, scroll-area, tooltip, sonner). Add more with `npx shadcn@latest add <name>`, then run `npm run format`. There is no calendar/date-picker; follow-ups use native `<input type="date">` and `<input type="time">`.
 - `components/`
   - `leads-screen.tsx`: client wrapper for the single screen. It holds the dialog state (`selectedLeadId` for the timeline, `isAddLeadOpen`), and it wraps `LeadList` in `<Suspense>`.
-  - `app-header.tsx`: logo and the blue "+ Add New Lead" button (`variant="brand"`), which opens the Add Lead dialog.
+  - `app-header.tsx`: `AppHeader({ actions })` and `LeadFlowLogo`. `LeadsScreen` passes the actions: the blue "+ Add New Lead" button (`variant="brand"`, opens the Add Lead dialog) and `UserMenu`. Without actions it is the shell that `RequireAuth` shows while loading.
+- `components/auth/`: the frontend auth. See "Authentication (frontend)" below.
 - `components/leads/`: the lead list, split into small files.
   - `lead-list.tsx` is the container (filters + `useLeads` + `useNow` + `groupLeads`). It also exposes a `reveal(lead)` handle through `ref`.
   - Also `lead-toolbar.tsx`, `lead-section.tsx`, `lead-card.tsx`, `lead-status-badge.tsx`, `lead-follow-up-chip.tsx`, `lead-list-skeleton.tsx`, `lead-list-states.tsx` (error and empty states).
   - `add-lead-dialog.tsx`: the Add New Lead modal. See "Add Lead dialog" below.
 - `components/leads/timeline/`: the lead timeline dialog. See "Timeline dialog" below.
 - `hooks/`
-  - React Query: `use-leads.ts` (`useLeads`), `use-lead.ts` (`useLead`, seeded from cached lists), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`).
+  - React Query: `use-leads.ts` (`useLeads`), `use-lead.ts` (`useLead`, seeded from cached lists), `use-lead-mutations.ts` (`useCreateLead`, `useUpdateLead`), `use-discussions.ts` (`useDiscussions`, `useCreateDiscussion`), `use-me.ts` (`useMe(token)`, used only by `AuthProvider`).
   - UI: `use-lead-filters.ts` (status + search, synced to the URL), `use-now.ts` (current time, refreshed every 60 s), `use-debounced-value.ts`.
 - `lib/dates.ts`: pure date logic (`formatTimeAgo`, `isFollowUpToday`, `isFollowUpOverdue`, `formatFollowUp`, `formatTimestamp`). There is no React here, and every relative function takes `now`.
   - `formatFollowUp(iso, now, { midSentence: true })` lowercases "today/tomorrow/yesterday" for use mid-sentence, e.g. "Overdue · due yesterday at 11:00 AM". Without the option they are capitalized.
@@ -309,17 +310,19 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
 - `lib/lead-filters.ts`: `matchesLeadFilters(lead, { status, search })` mirrors the API's filtering.
 - `components/ui/button.tsx` has an extra `brand` variant (blue) for LeadFlow's call-to-action buttons.
 - `test/lead-factory.ts`: test-only helpers (`makeLead`, `istToApi`).
-- `lib/api/`: `client.ts` (`apiFetch<T>`), `errors.ts` (`ApiError` + React Query error typing), `leads.ts`, `discussions.ts`
+- `lib/api/`: `client.ts` (`apiFetch<T>`, Bearer header, `setUnauthorizedHandler`), `errors.ts` (`ApiError` + React Query error typing), `auth.ts` (`login`, `register`, `getMe`), `leads.ts`, `discussions.ts`
+- `lib/auth/`: `token-storage.ts`, `safe-redirect.ts` (`getSafeRedirect`), `auth-form.ts` (`validateLoginForm`, `validateRegisterForm`), `login-url.ts` (`buildLoginUrl`). All pure and unit-tested.
+- `lib/demo-account.ts` (`DEMO_EMAIL`, `DEMO_PASSWORD`; must match the backend `DEMO_USER_*` defaults), `lib/user-initials.ts` (`getInitials`)
 - `lib/query-retry.ts` (retry policy), `lib/demo-mode.ts` (`NEXT_PUBLIC_DEMO_MODE` parsing); `components/demo-footer.tsx`; `hooks/use-delayed-flag.ts`
 - `lib/types.ts`: TypeScript mirrors of the backend schemas (snake_case, datetimes as ISO strings). Keep them in sync with `backend/app/schemas/`.
 - `lib/lead-status.ts`: status order, labels, badge classes, `isClosedStatus()`
-- `lib/query-keys.ts`: query key factory (`leads.all`, `leads.lists()`, `leads.list(params)`, `leads.detail(id)`, `discussions.byLead(id)`)
+- `lib/query-keys.ts`: query key factory (`leads.all`, `leads.lists()`, `leads.list(params)`, `leads.detail(id)`, `discussions.byLead(id)`, `auth.me` = `["auth","me"]`)
 - `lib/env.ts`: reads and validates `NEXT_PUBLIC_API_URL`
 - `lib/utils.ts`: shadcn `cn()`
 
 ### Data-access rules
 
-- **Components only talk to the API through the hooks in `src/hooks/`.** Hooks call `src/lib/api/*`, and only `src/lib/api/client.ts` calls `fetch`. Components never call `fetch` or `apiFetch` directly.
+- **Components only talk to the API through the hooks in `src/hooks/`.** Hooks call `src/lib/api/*`, and only `src/lib/api/client.ts` calls `fetch`. Components never call `fetch` or `apiFetch` directly. The one exception is `AuthProvider`, which owns the session and calls `lib/api/auth` `login` / `register` itself.
 - **Errors:** every API failure is an `ApiError` with `status`, `message` (the API's `detail`) and `fieldErrors` (`{ field: message }` from a 422). Status `0` means the API was unreachable. React Query's `error` is typed as `ApiError`.
 - **Invalidation:** mutations invalidate on success, so lists update immediately.
   - Creating a lead invalidates all lead lists.
@@ -389,7 +392,43 @@ Next.js **16.4** is newer than most training data, and its APIs and conventions 
   - closes the dialog;
   - calls `leadListRef.current.reveal(lead)`. If the active filters would hide the lead (`matchesLeadFilters`), it clears them (status All, empty search, so the URL params go too), then scrolls the card into view and plays a 2 s fading ring (`animate-lead-highlight`, defined in `globals.css` `@theme`, on `[data-lead-id]`);
   - toasts "Lead added" with a "Log discussion" action that sets `selectedLeadId`, opening the timeline.
-- **Dev-server gotcha:** if a change to `@theme` in `globals.css` doesn't show up in `npm run dev`, stop the dev server and delete `frontend/.next/dev`. Turbopack's persistent dev cache can keep the old CSS.
+- **Dev-server gotcha:** if a change to `@theme` in `globals.css` doesn't show up in `npm run dev`, stop the dev server and delete `frontend/.next/dev`. Turbopack's persistent dev cache can keep the old CSS. The same fix applies when an edit to `providers.tsx` leaves the dev server throwing "useAuth must be used inside <AuthProvider>".
+
+### Authentication (frontend) (`components/auth/`, `lib/auth/`)
+
+Mirrors the backend auth contract (`backend/app/schemas/auth.py`); keep `lib/types.ts` (`User`, `LoginRequest`, `RegisterRequest`, `TokenResponse`) and `lib/auth/auth-form.ts` in sync with it.
+
+- **Token storage (`lib/auth/token-storage.ts`):** `localStorage` key `leadflow.token`, with every access in try/catch.
+  - The in-memory copy is used ONLY when a storage write fails, so a token cleared by another tab can't linger.
+  - `subscribeToToken` (for `useSyncExternalStore`) fires on set/clear, on `storage` events from other tabs, and on `pageshow` with `persisted` (back/forward cache restore).
+- **API client (`lib/api/client.ts`):**
+  - It attaches `Authorization: Bearer <token>` whenever a token exists.
+  - On a 401 from any path except `/auth/login` and `/auth/register`, it calls the handler registered with `setUnauthorizedHandler` (a module-level setter, so there are no import cycles), then still throws the `ApiError`.
+- **`AuthProvider` (`auth-provider.tsx`, mounted in `providers.tsx`):** `useAuth()` gives `{ user, status, signOutReason, login, register, logout }`.
+  - The token comes from `useSyncExternalStore`; it is `undefined` on the server and during hydration, which means "loading".
+  - `useMe(token)` runs only when a token exists.
+  - `status`: no token → `unauthenticated`; `/me` data → `authenticated`; `/me` failed with something other than a 401 (network, 5xx) → `authenticated` with `user` null, so the screen shows its own error states; otherwise `loading`.
+  - `login` / `register`: put the user in the `["auth","me"]` cache BEFORE `setToken` (no extra `/me` request), then toast "Welcome back, <name>" / "Account created — welcome, <name>".
+  - `logout`: reason `"logout"`, `clearToken()`, `queryClient.clear()`, toast "Signed out".
+  - Unauthorized handler: does nothing if there is no token (several requests can 401 at once); otherwise reason `"expired"`, clears the token and the cache.
+  - The cache is also cleared whenever the token becomes null for any other reason (another tab, bfcache).
+- **Navigation:**
+  - `RequireAuth` (`require-auth.tsx`, wraps `LeadsScreen` in `app/page.tsx`) is the ONLY place that sends a user to `/login`. When the status is `unauthenticated`, it calls `router.replace(buildLoginUrl(path + query, signOutReason))`: `/login` after a logout, `/login?next=…&expired=1` after a 401, and `/login?next=…` otherwise.
+  - Until the status is `authenticated`, `RequireAuth` renders the header shell + `LeadListSkeleton` (plus the "waking up" notice after 4 s), never the children.
+  - `/login` and `/register` use `RedirectIfAuthenticated`, which sends an authenticated user to `getSafeRedirect(next)`. That one effect also handles the redirect after a successful sign-in, so the forms never navigate themselves.
+  - `getSafeRedirect` accepts only paths that start with a single `/`. It rejects `//`, `/\`, other schemes and control characters, and falls back to `/`.
+  - `SessionExpiredNotice` (login page) shows "Your session expired. Please sign in again." with a fixed toast id, then removes `expired` from the URL.
+  - Everything reading `useSearchParams` lives in `auth-navigation.tsx`, each part in its own `<Suspense>`, so the cards and forms stay in the prerendered shell. `AuthSwitchLink` keeps `?next=` when switching between sign-in and create-account.
+- **Pages:** `AuthCard` gives the centered layout (logo, white card `max-w-sm`, footer link). Metadata titles are "Sign in · LeadFlow" and "Create account · LeadFlow".
+- **Forms (`login-form.tsx`, `register-form.tsx`, `auth-field.tsx`):**
+  - Client validation runs first: inline errors, `aria-invalid`, focus on the first invalid field.
+  - While pending (and after success, until the redirect): inputs disabled, spinner in the button. After 4 s pending: "Waking up the server — the first sign-in can take up to a minute…".
+  - Login 401: red `FormAlert` with the API message above the button; the email is kept, the password cleared and focused.
+  - Register 409: the message goes under Email. A 422 maps `fieldErrors` to the fields. Anything else goes in the alert.
+  - `AuthField` with `type="password"` adds the eye toggle (aria-label "Show password" / "Hide password").
+  - "Use demo account" fills `DEMO_EMAIL` / `DEMO_PASSWORD` and submits.
+- **Header:** `UserMenu` (`user-menu.tsx`) is the initials avatar (aria-label "Account menu"), opening a dropdown with name, email, a separator and "Log out".
+- **Next 16 gotcha:** with Cache Components, the previous route stays mounted but hidden (React Activity) after a client navigation. Never render lead data unless authenticated. In headless-browser checks, match only visible elements (`getByLabel` also finds hidden ones).
 
 ### Commands (run from `frontend/`)
 
