@@ -12,10 +12,11 @@ from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import ENV_FILE, settings
+from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 from app.db.session import create_db_engine, get_db
 from app.main import app
-from app.models import Discussion, Lead
+from app.models import Discussion, Lead, User
 
 BACKEND_DIR = ENV_FILE.parent
 
@@ -126,3 +127,29 @@ def make_discussion(db: Session) -> Callable[..., Discussion]:
         return discussion
 
     return factory
+
+
+TEST_USER_PASSWORD = "correct-horse-battery"
+
+
+@pytest.fixture
+def make_user(db: Session) -> Callable[..., User]:
+    """Insert a user straight through the ORM, with a real password hash."""
+
+    def factory(
+        email: str = "rep@example.com", name: str = "Sales Rep", password: str = TEST_USER_PASSWORD
+    ) -> User:
+        user = User(email=email.lower(), name=name, password_hash=hash_password(password))
+        db.add(user)
+        db.commit()
+        return user
+
+    return factory
+
+
+@pytest.fixture
+def auth_client(client: TestClient, make_user: Callable[..., User]) -> TestClient:
+    """The API client, logged in as a fresh user (sends "Authorization: Bearer <token>")."""
+    user = make_user()
+    client.headers["Authorization"] = f"Bearer {create_access_token(user.id)}"
+    return client

@@ -5,6 +5,7 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+JWT_SECRET_MIN_LENGTH = 32
 
 
 class Settings(BaseSettings):
@@ -17,6 +18,24 @@ class Settings(BaseSettings):
     SEED_TIMEZONE: str = "Asia/Kolkata"
     # Enables POST /api/demo/reset when non-empty (the caller must send it as X-Demo-Token).
     DEMO_RESET_TOKEN: str = ""
+
+    # Auth: HS256 signing key for access tokens, and their lifetime (default 7 days).
+    JWT_SECRET: str
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 10080
+    # The one-click demo account; ensure_demo_user keeps it present with this password.
+    DEMO_USER_EMAIL: str = "demo@leadflow.app"
+    DEMO_USER_PASSWORD: str = "demo1234"
+    DEMO_USER_NAME: str = "Demo User"
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def require_long_jwt_secret(cls, value: str) -> str:
+        if len(value) < JWT_SECRET_MIN_LENGTH:
+            raise ValueError(
+                f"JWT_SECRET must be at least {JWT_SECRET_MIN_LENGTH} characters long "
+                "(generate one with: openssl rand -hex 32)"
+            )
+        return value
 
     @field_validator("DATABASE_URL")
     @classmethod

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.main import app
-from app.models import Discussion, Lead
+from app.models import Discussion, Lead, User
 
 RESET_URL = "/api/demo/reset"
 TOKEN = "test-demo-token"
@@ -62,3 +62,17 @@ def test_reset_replaces_all_data_with_the_demo_set(
 
 def test_reset_is_hidden_from_the_api_docs() -> None:
     assert not any(path.startswith("/api/demo") for path in app.openapi()["paths"])
+
+
+def test_reset_keeps_users_and_ensures_the_demo_user(
+    client: TestClient, demo_token: str, make_user: Callable[..., User], db: Session
+) -> None:
+    make_user(email="rep@example.com")
+
+    response = client.post(RESET_URL, headers={"X-Demo-Token": demo_token})
+
+    assert response.status_code == 200
+    db.expire_all()
+    emails = set(db.scalars(select(User.email)).all())
+    assert emails == {"rep@example.com", settings.DEMO_USER_EMAIL.lower()}
+

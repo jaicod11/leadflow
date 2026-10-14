@@ -1,15 +1,17 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
-from app.api.deps import DbSession
-from app.api.responses import BUSINESS_RULE_ERROR, NOT_FOUND_ERROR, VALIDATION_ERROR
+from app.api.deps import DbSession, get_current_user
+from app.api.responses import BUSINESS_RULE_ERROR, NOT_FOUND_ERROR, UNAUTHORIZED_ERROR, VALIDATION_ERROR
 from app.models import Discussion
 from app.schemas.discussion import DiscussionCreate, DiscussionRead
 from app.services import discussion_service
 
+# Every route here requires a logged-in user (router-level, so no endpoint can forget it).
 router = APIRouter(
     prefix="/leads/{lead_id}/discussions",
     tags=["discussions"],
-    responses={**NOT_FOUND_ERROR, **VALIDATION_ERROR},
+    dependencies=[Depends(get_current_user)],
+    responses={**UNAUTHORIZED_ERROR, **NOT_FOUND_ERROR, **VALIDATION_ERROR},
 )
 
 

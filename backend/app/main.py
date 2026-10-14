@@ -15,7 +15,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
-    allow_headers=["*"],
+    # Authorization carries the Bearer token; Content-Type is needed for JSON bodies.
+    allow_headers=["Authorization", "Content-Type"],
 )
 register_exception_handlers(app)
 app.include_router(api_router, prefix="/api")

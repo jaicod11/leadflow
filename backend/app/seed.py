@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models import Discussion, Lead, LeadStatus
+from app.services.auth_service import ensure_demo_user
 
 # How a seeded discussion sets a follow-up:
 #   "current": the lead's current follow-up (its demo scenario, see LeadSpec.follow_up);
@@ -397,6 +398,10 @@ def _print_summary(leads: list[Lead], clock: DemoClock) -> None:
         print("  ".join(value.ljust(width) for value, width in zip(line, widths, strict=True)).rstrip())
 
 
+def _print_demo_login() -> None:
+    print(f"Demo login: {settings.DEMO_USER_EMAIL} / {settings.DEMO_USER_PASSWORD}")
+
+
 @dataclass(frozen=True)
 class DemoDataCounts:
     leads: int
@@ -414,19 +419,30 @@ def _insert_demo_data(db: Session, *, reset: bool) -> tuple[list[Lead], DemoCloc
 
 
 def reset_demo_data(db: Session) -> DemoDataCounts:
-    """Wipe leads and discussions and insert fresh demo data, in one transaction. Prints nothing."""
+    """Wipe leads and discussions (never users) and insert fresh demo data, in one transaction.
+
+    Also makes sure the demo user exists with the configured password. Prints nothing.
+    """
     leads, _ = _insert_demo_data(db, reset=True)
+    ensure_demo_user(db)
     return DemoDataCounts(leads=len(leads), discussions=sum(len(lead.discussions) for lead in leads))
 
 
 def seed(db: Session, *, reset: bool = False) -> bool:
-    """Insert the demo data and return True; return False without changes if leads exist and reset is False."""
+    """Insert the demo data and return True; return False without changes if leads exist and reset is False.
+
+    The demo user is ensured on EVERY run, also when the leads are left alone (e.g. on Render, where
+    the leads table is already populated and SEED_ON_STARTUP would otherwise never create the user).
+    """
+    ensure_demo_user(db)
     if not reset and db.scalar(select(func.count()).select_from(Lead)):
         print("The leads table already has data, so nothing was changed. Use --reset to wipe it and seed again.")
+        _print_demo_login()
         return False
 
     leads, clock = _insert_demo_data(db, reset=reset)
     _print_summary(leads, clock)
+    _print_demo_login()
     return True
 
 

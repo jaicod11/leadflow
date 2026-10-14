@@ -24,6 +24,8 @@ services:
         sync: false # the Vercel URL, e.g. https://leadflow.vercel.app
       - key: DEMO_RESET_TOKEN
         sync: false # long random string; the same value goes into the GitHub secret DEMO_RESET_TOKEN
+      - key: JWT_SECRET
+        sync: false # access-token signing key: 32+ random characters (e.g. `openssl rand -hex 32`)
       - key: SEED_ON_STARTUP
         value: "true"
       - key: SEED_TIMEZONE

@@ -28,6 +28,12 @@ services:
       SEED_TIMEZONE: ${SEED_TIMEZONE:-Asia/Kolkata}
       # Empty = POST /api/demo/reset is disabled (404).
       DEMO_RESET_TOKEN: ${DEMO_RESET_TOKEN:-}
+      # DEV ONLY default signing key (32+ chars); set JWT_SECRET in ./.env for anything real.
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-jwt-secret-change-me-in-production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-10080}
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-demo@leadflow.app}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-demo1234}
+      DEMO_USER_NAME: ${DEMO_USER_NAME:-Demo User}
     ports:
       - "8000:8000"
     depends_on:

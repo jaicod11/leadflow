@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Discussion, Lead, LeadStatus
+from app.core.config import settings
+from app.models import Discussion, Lead, LeadStatus, User
 from app.seed import seed
 
 
@@ -71,3 +72,19 @@ def test_seed_with_reset_replaces_existing_data(db: Session) -> None:
     assert len(names) == 10
     assert "Leftover Lead" not in names
     assert db.scalar(select(Lead.id).order_by(Lead.id).limit(1)) == 1  # identities restarted
+
+
+def test_seed_with_existing_leads_still_creates_the_demo_user(
+    db: Session, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db.add(Lead(name="Existing Lead"))
+    db.commit()
+
+    assert seed(db) is False  # leads are left alone...
+
+    db.expire_all()
+    assert db.scalars(select(Lead.name)).all() == ["Existing Lead"]
+    demo_user = db.scalar(select(User).where(User.email == settings.DEMO_USER_EMAIL.lower()))
+    assert demo_user is not None  # ...but the demo user is created
+    assert f"Demo login: {settings.DEMO_USER_EMAIL}" in capsys.readouterr().out
+

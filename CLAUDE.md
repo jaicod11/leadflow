@@ -65,7 +65,10 @@ All routes are under the `/api` prefix (interactive docs at `/docs`).
 
 | Method | Path | Body | Success | Errors |
 | --- | --- | --- | --- | --- |
-| GET | `/api/health` | — | 200 `{"status":"ok","database":"ok"}` | 503 `{"status":"error","database":"unreachable"}` |
+| GET | `/api/health` (public) | — | 200 `{"status":"ok","database":"ok"}` | 503 `{"status":"error","database":"unreachable"}` |
+| POST | `/api/auth/register` (public) | `RegisterRequest` | 201 `TokenResponse` | 409 (email taken), 422 |
+| POST | `/api/auth/login` (public) | `LoginRequest` | 200 `TokenResponse` | 401 `"Invalid email or password"`, 422 |
+| GET | `/api/auth/me` (Bearer) | — | 200 `UserRead` | 401 |
 | GET | `/api/leads?status=&search=` | — | 200 `LeadRead[]` | 422 (e.g. invalid `status`) |
 | POST | `/api/leads` | `LeadCreate` | 201 `LeadRead` | 422 |
 | GET | `/api/leads/{lead_id}` | — | 200 `LeadRead` | 404, 422 |
@@ -109,7 +112,9 @@ There is no DELETE endpoint and no pagination; both are out of scope.
 | Status | When | Body |
 | --- | --- | --- |
 | 400 | Business rule violated (`BusinessRuleError`) | `{"detail": "..."}` |
+| 401 | Not logged in / bad token / bad credentials (`AuthenticationError`, sends `WWW-Authenticate: Bearer`) | `{"detail": "Not authenticated"}` (no token) · `"Invalid or expired token"` · `"Invalid email or password"` |
 | 401 | Bad or missing demo token (`UnauthorizedError`) | `{"detail": "Invalid demo token"}` |
+| 409 | Email already registered (`ConflictError`) | `{"detail": "An account with this email already exists"}` |
 | 404 | Missing resource (`NotFoundError`) | `{"detail": "Lead not found"}` |
 | 422 | Request validation failed | `{"detail": "Validation failed", "errors": [{"field": "name", "message": "..."}]}` |
 | 500 | Unhandled exception | `{"detail": "Internal server error"}` (traceback logged server-side, exactly once) |
@@ -120,16 +125,47 @@ There is no DELETE endpoint and no pagination; both are out of scope.
 - Routes stay thin: they call one service function. DB logic lives in `app/services/`.
 - Every route declares `response_model`, `status_code`, a tag (`health`, `leads`, `discussions`) and a `summary`. Error responses are documented with the specs in `app/api/responses.py`.
 
+### Authentication (backend)
+
+- **Model:** email + password, HS256 JWT access tokens sent as `Authorization: Bearer <token>`. No cookies, because the frontend and API are on different domains and third-party cookies get blocked.
+- **Shared workspace:** auth gates access, and every user sees the same leads (no `owner_id`).
+- **`app/core/security.py`:**
+  - `hash_password` / `verify_password` use pwdlib Argon2id (`PasswordHash.recommended()`), as the FastAPI tutorial does; never passlib. `verify_password` returns False for an unknown or corrupted hash instead of raising.
+  - `create_access_token(user_id)` sets claims `sub` (string id), `iat`, `exp` (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 7 days).
+  - `decode_access_token` returns the user id, or None for anything malformed, tampered with or expired.
+- **Config:** `JWT_SECRET` is required and at least 32 characters; otherwise `Settings()` fails with a clear error. Compose and `backend/.env` carry a dev-only value, and CI sets its own.
+- **`get_current_user` (`app/api/deps.py`):** reads the token through `HTTPBearer(auto_error=False)`, which also gives `/docs` its lock icons and Authorize button.
+  - No `Authorization` header gives 401 `"Not authenticated"`.
+  - A malformed header (e.g. `Basic …`, empty token), an invalid/expired/tampered token, or a deleted user gives 401 `"Invalid or expired token"`.
+  - Every one of these carries `WWW-Authenticate: Bearer` (`AuthenticationError`).
+- **Route protection:**
+  - The leads and discussions routers have `dependencies=[Depends(get_current_user)]` at ROUTER level. New endpoints there are protected automatically.
+  - `/api/health` and `/api/auth/register|login` are public.
+  - `/api/demo/reset` keeps its own `X-Demo-Token` check (no JWT) for the GitHub workflow.
+- **`auth_service`:**
+  - `register_user` → 409 `ConflictError` on a duplicate email, including the race where the INSERT hits `uq_users_email` (`IntegrityError` with `UniqueViolation`).
+  - `authenticate_user` gives the same `None` for an unknown email and a wrong password, and verifies against a dummy hash for unknown emails, so timing is equal.
+  - `build_token_response(user)` builds the `TokenResponse`.
+- **Users table:** `email` String(254) is unique and stored lowercase, enforced by schema lowercasing and DB CHECK `ck_users_email_lowercase`. Also `name` String(80), `password_hash`, `created_at`. `UserRead` never includes `password_hash`.
+- **Demo user:**
+  - `ensure_demo_user(db)` creates `DEMO_USER_EMAIL` if missing, or resets its password to `DEMO_USER_PASSWORD`.
+  - The seed CLI calls it on EVERY run, even when it skips seeding because leads exist (needed on Render), and prints the demo login.
+  - `reset_demo_data` calls it too, and only ever truncates leads and discussions, never users.
+- **CORS:** `allow_headers=["Authorization", "Content-Type"]`.
+- **Tests:**
+  - `make_user` (ORM, real hash) and `auth_client` (a client with a Bearer token for a fresh user) in `conftest.py`. Leads and discussions tests use `auth_client`.
+  - `tests/test_auth.py` derives the "every endpoint needs a token" cases from the OpenAPI paths, so new endpoints are covered automatically.
+
 ### Backend layout
 
-- `app/core/`: settings (`config.py`), exceptions and their handlers (`exceptions.py`), the 500 middleware (`middleware.py`)
+- `app/core/`: settings (`config.py`), exceptions and their handlers (`exceptions.py`), the 500 middleware (`middleware.py`), password hashing + JWT (`security.py`)
 - `app/db/`: declarative base and session/engine
 - `app/models/`: SQLAlchemy ORM models
 - `app/schemas/`: Pydantic request/response schemas (`common.py` holds the shared `UtcDatetime`)
-- `app/services/`: DB/business logic (`lead_service.py`, `discussion_service.py`)
-- `app/api/routes/`: thin routers (`health.py`, `leads.py`, `discussions.py`)
+- `app/services/`: DB/business logic (`lead_service.py`, `discussion_service.py`, `auth_service.py`)
+- `app/api/routes/`: thin routers (`health.py`, `auth.py`, `leads.py`, `discussions.py`, `demo.py`)
 - `app/api/router.py`: aggregates the routers
-- `app/api/deps.py`: the `DbSession` dependency
+- `app/api/deps.py`: the `DbSession` dependency, `get_current_user` / `CurrentUser`, and the `HTTPBearer` scheme
 - `app/api/responses.py`: OpenAPI error-response specs
 - `app/main.py`: FastAPI app, middleware, exception handlers, and the `/api` mount
 - `app/seed.py`: demo data seeder (`python -m app.seed`)
@@ -197,7 +233,7 @@ Dev mode and the full Docker stack both use ports 3000 and 8000. Before running 
 ## Environment files
 
 - **`/.env.example`** lists EVERY variable the project reads, with safe defaults. Each one is tagged by what reads it: `[compose]`, `[backend]`, `[tests]`, `[entrypoint]` or `[frontend]`. Copy it to `/.env` only to override compose defaults.
-- **`backend/.env.example`** → `backend/.env`: `DATABASE_URL`, `CORS_ORIGINS`, `SEED_TIMEZONE`, `DEMO_RESET_TOKEN`, `TEST_DATABASE_URL`. `SEED_ON_STARTUP` and `PORT` are documented there but read only by the container entrypoint.
+- **`backend/.env.example`** → `backend/.env`: `DATABASE_URL`, `CORS_ORIGINS`, `JWT_SECRET` (dev-only value), `ACCESS_TOKEN_EXPIRE_MINUTES`, `DEMO_USER_EMAIL` / `DEMO_USER_PASSWORD` / `DEMO_USER_NAME`, `SEED_TIMEZONE`, `DEMO_RESET_TOKEN`, `TEST_DATABASE_URL`. `SEED_ON_STARTUP` and `PORT` are documented there but read only by the container entrypoint.
 - **`frontend/.env.example`** → `frontend/.env.local`: `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_DEMO_MODE`.
 - **Keep the three files consistent** with each other, with the code (`app/core/config.py`, `tests/conftest.py`, `docker-entrypoint.sh`, `src/lib/env.ts`), with `render.yaml` and with the README's env table. When adding a variable, update all of them.
 

@@ -15,6 +15,7 @@ class AppError(Exception):
     """Base class for errors whose message is safe to return to the client."""
 
     status_code: int
+    headers: dict[str, str] | None = None
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -29,8 +30,21 @@ class BusinessRuleError(AppError):
     status_code = status.HTTP_400_BAD_REQUEST
 
 
+class ConflictError(AppError):
+    status_code = status.HTTP_409_CONFLICT
+
+
 class UnauthorizedError(AppError):
+    """401 for the demo-reset token (X-Demo-Token), which is not a Bearer scheme."""
+
     status_code = status.HTTP_401_UNAUTHORIZED
+
+
+class AuthenticationError(AppError):
+    """401 for user authentication; tells the client to authenticate with a Bearer token."""
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+    headers = {"WWW-Authenticate": "Bearer"}
 
 
 def _field_path(loc: Sequence[int | str]) -> str:
@@ -57,7 +71,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:
         body = ErrorResponse(detail=exc.detail)
-        return JSONResponse(status_code=exc.status_code, content=body.model_dump())
+        return JSONResponse(status_code=exc.status_code, content=body.model_dump(), headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def handle_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:

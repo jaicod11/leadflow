@@ -1,14 +1,20 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import DbSession
-from app.api.responses import BUSINESS_RULE_ERROR, NOT_FOUND_ERROR, VALIDATION_ERROR
+from app.api.deps import DbSession, get_current_user
+from app.api.responses import BUSINESS_RULE_ERROR, NOT_FOUND_ERROR, UNAUTHORIZED_ERROR, VALIDATION_ERROR
 from app.models import LeadStatus
 from app.schemas.lead import LeadCreate, LeadRead, LeadUpdate
 from app.services import lead_service
 
-router = APIRouter(prefix="/leads", tags=["leads"], responses=VALIDATION_ERROR)
+# Every route here requires a logged-in user (router-level, so no endpoint can forget it).
+router = APIRouter(
+    prefix="/leads",
+    tags=["leads"],
+    dependencies=[Depends(get_current_user)],
+    responses={**UNAUTHORIZED_ERROR, **VALIDATION_ERROR},
+)
 
 
 @router.get(

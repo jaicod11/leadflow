@@ -42,11 +42,12 @@ Screenshots live in [`docs/screenshots/`](docs/screenshots/).
 **Extras**
 
 - [x] "Mark done" clears a lead's follow-up from the dialog
+- [x] Optional login (API): email + password with JWT access tokens, shared workspace, one-click demo account (`demo@leadflow.app` / `demo1234`); see [Authentication](#authentication)
 - [x] Filters and search are synced to the URL (`?status=qualified&q=pri`), so a refresh or a shared link keeps them
 - [x] Live time: "time ago", today and overdue update every minute without a refresh, including across midnight
 - [x] A newly created lead is scrolled into view and briefly highlighted, and filters that would hide it are cleared
 - [x] Consistent JSON errors with field-level messages, shown inline under form fields
-- [x] Tests: 46 backend (pytest) and 114 frontend (Vitest)
+- [x] Tests: 82 backend (pytest) and 114 frontend (Vitest)
 - [x] GitHub Actions CI for both apps
 - [x] Deployment-ready: Render Blueprint, cold-start friendly frontend (retries + "waking up" notice), and a daily demo reset
 
@@ -144,7 +145,7 @@ The seed is idempotent: without `--reset` it leaves an existing database untouch
 
 ## Testing
 
-**Backend:** 46 tests (pytest). The suite needs the `db` container. It uses a **separate `leadflow_test` database**, which it creates if missing and migrates down and up on every run (so the migrations get tested too). It truncates all tables before each test.
+**Backend:** 82 tests (pytest). The suite needs the `db` container. It uses a **separate `leadflow_test` database**, which it creates if missing and migrates down and up on every run (so the migrations get tested too). It truncates all tables before each test.
 
 ```bash
 cd backend
@@ -177,6 +178,11 @@ Every variable is listed in the root [`.env.example`](.env.example). Locally, th
 | `SEED_TIMEZONE` | backend (seed), compose | no | `Asia/Kolkata` | Timezone that defines "today" for the seeded follow-ups |
 | `SEED_ON_STARTUP` | API container, compose | no | `false` (compose: `true`) | Seed demo data when the API container starts; skipped if leads exist |
 | `DEMO_RESET_TOKEN` | backend, compose | no | empty (disabled) | Enables `POST /api/demo/reset` when set; callers must send it in `X-Demo-Token` |
+| `JWT_SECRET` | backend, compose | **yes** | compose: a dev-only value | HS256 signing key for access tokens. At least 32 characters, or the API refuses to start. Use `openssl rand -hex 32` in production |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | backend, compose | no | `10080` (7 days) | Access-token lifetime |
+| `DEMO_USER_EMAIL` | backend, compose | no | `demo@leadflow.app` | Email of the one-click demo account (kept present by the seed and the demo reset) |
+| `DEMO_USER_PASSWORD` | backend, compose | no | `demo1234` | Its password, which is reset to this value on every seed and demo reset |
+| `DEMO_USER_NAME` | backend, compose | no | `Demo User` | Its display name |
 | `PORT` | API container | no | `8000` | Port uvicorn listens on inside the container (Render injects it) |
 | `TEST_DATABASE_URL` | backend tests | no | `…@localhost:5433/leadflow_test` | Separate test database; must differ from `DATABASE_URL` |
 | `NEXT_PUBLIC_API_URL` | frontend (build time), compose build arg | yes | compose: `http://localhost:8000/api` | API base URL including `/api`. Inlined into the browser bundle, so rebuild after changing it |
@@ -223,30 +229,62 @@ LeadFlow/
 
 Interactive docs: **http://localhost:8000/docs**. All routes are under `/api`. Datetimes are UTC ISO 8601 with an offset, e.g. `2026-10-14T10:00:00+00:00`, and request datetimes must include an offset.
 
-| Method | Path | Success | Errors |
-| --- | --- | --- | --- |
-| GET | `/api/health` | 200 `{"status":"ok","database":"ok"}` | 503 `{"status":"error","database":"unreachable"}` |
-| GET | `/api/leads?status=&search=` | 200 list of leads (each with `last_note`, `last_discussion_at`) | 422 |
-| POST | `/api/leads` | 201 lead | 422 |
-| GET | `/api/leads/{lead_id}` | 200 lead | 404, 422 |
-| PATCH | `/api/leads/{lead_id}` | 200 lead | 400, 404, 422 |
-| GET | `/api/leads/{lead_id}/discussions` | 200 discussions, newest first | 404, 422 |
-| POST | `/api/leads/{lead_id}/discussions` | 201 discussion | 400, 404, 422 |
+🔒 = requires `Authorization: Bearer <access_token>` (see [Authentication](#authentication)). In `/docs`, call `POST /api/auth/login`, then paste the `access_token` into **Authorize**.
 
-There is one more endpoint, hidden from `/docs` and meant only for the deployed demo: `POST /api/demo/reset` with the header `X-Demo-Token`.
+| Method | Path | Auth | Success | Errors |
+| --- | --- | --- | --- | --- |
+| GET | `/api/health` | public | 200 `{"status":"ok","database":"ok"}` | 503 `{"status":"error","database":"unreachable"}` |
+| POST | `/api/auth/register` | public | 201 `{access_token, token_type, user}` | 409, 422 |
+| POST | `/api/auth/login` | public | 200 `{access_token, token_type, user}` | 401, 422 |
+| GET | `/api/auth/me` | 🔒 | 200 user (`id`, `email`, `name`, `created_at`) | 401 |
+| GET | `/api/leads?status=&search=` | 🔒 | 200 list of leads (each with `last_note`, `last_discussion_at`) | 401, 422 |
+| POST | `/api/leads` | 🔒 | 201 lead | 401, 422 |
+| GET | `/api/leads/{lead_id}` | 🔒 | 200 lead | 401, 404, 422 |
+| PATCH | `/api/leads/{lead_id}` | 🔒 | 200 lead | 400, 401, 404, 422 |
+| GET | `/api/leads/{lead_id}/discussions` | 🔒 | 200 discussions, newest first | 401, 404, 422 |
+| POST | `/api/leads/{lead_id}/discussions` | 🔒 | 201 discussion | 400, 401, 404, 422 |
+
+There is one more endpoint, hidden from `/docs` and meant only for the deployed demo: `POST /api/demo/reset` with the header `X-Demo-Token`. It doesn't use a Bearer token, so the GitHub workflow can call it.
 - It is disabled (404) unless `DEMO_RESET_TOKEN` is set.
 - A missing or wrong token gets 401.
-- Success is 200 `{"leads": 10, "discussions": 27}`, after it wipes the data and seeds it again.
+- Success is 200 `{"leads": 10, "discussions": 27}`, after it wipes the leads and discussions (never users), seeds them again, and makes sure the demo user exists.
 
 Error responses are always JSON:
 
 ```jsonc
-// 400 business rule, 404 not found, 500 unexpected error
+// 400 business rule, 404 not found, 409 conflict, 500 unexpected error
 { "detail": "Follow-up time must be in the future" }
+
+// 401 (with header WWW-Authenticate: Bearer)
+{ "detail": "Not authenticated" }          // no token
+{ "detail": "Invalid or expired token" }   // malformed, tampered, expired, or the user was deleted
+{ "detail": "Invalid email or password" }  // login
 
 // 422 validation (field = dotted path without the body/query/path prefix)
 { "detail": "Validation failed", "errors": [{ "field": "name", "message": "This field cannot be empty" }] }
 ```
+
+## Authentication
+
+Login is optional in the assignment, and LeadFlow implements it as **email + password**, with the API issuing JWT access tokens.
+
+- **Demo account:** `demo@leadflow.app` / `demo1234`, configurable via `DEMO_USER_*`.
+  - The seed creates it on every run, even when the leads already exist (which matters on Render).
+  - The daily demo reset re-creates it if needed and resets its password, so the public credentials always work.
+- **Tokens:**
+  - The token is an HS256 JWT signed with `JWT_SECRET`, which is required and must be at least 32 characters.
+  - Claims: `sub` (user id), `iat`, `exp`. It lasts 7 days (`ACCESS_TOKEN_EXPIRE_MINUTES`).
+  - Clients send it as `Authorization: Bearer <token>`.
+- **Passwords:** hashed with Argon2id via `pwdlib`, as the FastAPI security tutorial now recommends.
+  - Emails are stored lowercase, and are unique regardless of case.
+  - Login answers an unknown email exactly like a wrong password. For unknown emails it still verifies against a dummy hash, so response times don't reveal which accounts exist.
+- **Shared workspace:** every logged-in user sees and edits the same leads; there is no `owner_id`. Authentication gates *access* rather than splitting data, which suits a small sales team and keeps the demo simple.
+
+**Why Bearer tokens instead of cookies?**
+- The frontend (Vercel) and the API (Render) are on different domains, so a session cookie would be a *third-party* cookie, which Safari and Brave block (and Chrome restricts).
+- A header token works in every browser, needs no CSRF protection (browsers never attach it automatically), and makes `/docs` and `curl` easy to use.
+- The trade-off: the frontend has to store the token somewhere JavaScript can read it, so it is exposed if the page ever has an XSS bug. React's escaping and the absence of `dangerouslySetInnerHTML` keep that risk low.
+- The tokens can't be revoked before they expire. A server-side denylist or short-lived access tokens plus refresh tokens would fix that if needed.
 
 ## Design decisions & assumptions
 
@@ -273,7 +311,8 @@ This project was built with AI assistance:
 
 ## Known limitations & future work
 
-- **Authentication:** optional login is not built yet; anyone who can reach the app can use it.
+- **Login screen:** the API side of authentication is done; the frontend login screen comes next. Until then the web app gets 401s from the API.
+- **Token revocation:** access tokens can't be revoked before they expire (7 days); there is no logout on the server or refresh-token rotation.
 - **Pagination:** the list loads every lead at once, which is fine for hundreds of leads but not thousands.
 - **Delete / archive:** leads and discussions can't be removed yet.
 - **Reminders and notifications:** follow-ups are only visible in the app (no email or push).
@@ -308,6 +347,7 @@ You don't need to create tables. The API runs `alembic upgrade head` every time 
    | `DATABASE_URL` | the Neon **direct** connection string from step 1 |
    | `CORS_ORIGINS` | `http://localhost:3000` for now; you replace it in step 4 |
    | `DEMO_RESET_TOKEN` | a long random string, e.g. the output of `openssl rand -hex 32` (keep it for step 5) |
+   | `JWT_SECRET` | another, different `openssl rand -hex 32` value. It signs the login tokens; changing it logs everyone out |
 
    `SEED_ON_STARTUP=true` and `SEED_TIMEZONE=Asia/Kolkata` come from `render.yaml`, and Render injects `PORT`.
 3. After the first deploy, open `https://<your-service>.onrender.com/api/health`. It should return `{"status":"ok","database":"ok"}`. The first start seeds the demo data.

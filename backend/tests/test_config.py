@@ -1,4 +1,6 @@
 import pytest
+from pydantic import ValidationError
+from pydantic_settings import SettingsConfigDict
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from sqlalchemy import make_url
 
@@ -10,9 +12,17 @@ from app.db.session import create_db_engine
 NEON_URL = "postgresql://user:pass@ep-xxx.region.aws.neon.tech/dbname?sslmode=require&channel_binding=require"
 
 
+VALID_JWT_SECRET = "x" * 32
+
+
 def make_settings(**values: str) -> Settings:
     return Settings.model_validate(
-        {"DATABASE_URL": "postgresql+psycopg://u:p@localhost/db", "CORS_ORIGINS": "http://localhost:3000", **values}
+        {
+            "DATABASE_URL": "postgresql+psycopg://u:p@localhost/db",
+            "CORS_ORIGINS": "http://localhost:3000",
+            "JWT_SECRET": VALID_JWT_SECRET,
+            **values,
+        }
     )
 
 
@@ -53,3 +63,25 @@ def test_cors_origins_accept_full_https_vercel_urls() -> None:
     settings = make_settings(CORS_ORIGINS="https://leadflow-demo.vercel.app/, http://localhost:3000")
 
     assert settings.CORS_ORIGINS == ["https://leadflow-demo.vercel.app", "http://localhost:3000"]
+
+
+def test_jwt_secret_shorter_than_32_characters_is_a_config_error() -> None:
+    with pytest.raises(ValidationError, match="JWT_SECRET must be at least 32 characters long"):
+        make_settings(JWT_SECRET="x" * 31)
+
+
+def test_jwt_secret_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+
+    class SettingsWithoutEnvFile(Settings):
+        model_config = SettingsConfigDict(env_file=None)
+
+    with pytest.raises(ValidationError, match="JWT_SECRET"):
+        # No env var and no .env file: JWT_SECRET is deliberately missing.
+        SettingsWithoutEnvFile(  # type: ignore[call-arg]
+            DATABASE_URL="postgresql+psycopg://u:p@localhost/db", CORS_ORIGINS=["http://x"]
+        )
+
+
+def test_a_32_character_jwt_secret_is_accepted() -> None:
+    assert make_settings(JWT_SECRET=VALID_JWT_SECRET).JWT_SECRET == VALID_JWT_SECRET
