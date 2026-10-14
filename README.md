@@ -2,19 +2,53 @@
 
 A single-screen lead management tool (a lightweight CRM): track leads, log every discussion, and never miss a follow-up.
 
-<!-- TODO(Jaideep): add the links once deployed / recorded -->
-- **Live demo:** _coming soon_
-- **Demo video:** _coming soon_
+- **Live demo:** https://lead-floow.vercel.app
+- **API docs:** https://leadflow-api-wkhz.onrender.com/docs
+- **Demo login:** `demo@leadflow.app` / `demo1234` (or click **Use demo account** on the sign-in page)
+- **Demo video:** coming soon <!-- TODO(Jaideep): add video link -->
+
+> The API runs on Render's free tier, so the first visit can take up to a minute while it wakes up; the demo data resets daily at 9:00 AM IST.
 
 ## Screenshots
 
-Screenshots live in [`docs/screenshots/`](docs/screenshots/).
-
-<!-- TODO(Jaideep): add images to docs/screenshots/ and uncomment
-![Lead list with today's follow-ups and overdue leads](docs/screenshots/lead-list.png)
-![Lead timeline dialog](docs/screenshots/timeline-dialog.png)
-![Add New Lead modal](docs/screenshots/add-lead.png)
--->
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/01-login.png" alt="Sign-in page with the demo account box">
+      <br><b>Sign in</b>: email and password, or one click on <i>Use demo account</i>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/02-lead-list.png" alt="Lead list with today's follow-ups pinned, overdue leads in red and won/lost leads faded">
+      <br><b>Lead list</b>: today's follow-ups pinned, overdue in red, won/lost faded
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/04-status-filter.png" alt="Lead list filtered to Qualified leads">
+      <br><b>Status filter</b>: Qualified only (kept in the URL)
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/05-add-lead.png" alt="Add New Lead modal with a name and company filled in">
+      <br><b>Add New Lead</b>: name required, company and phone optional
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/03-timeline-dialog.png" alt="Kavya Reddy's timeline dialog with a note being typed and Set follow-up checked">
+      <br><b>Timeline dialog</b>: history newest first, a new note with a follow-up, status dropdown
+    </td>
+    <td width="50%" valign="top" align="center">
+      <img src="docs/screenshots/06-mobile.png" alt="Lead list on a 390px-wide phone screen" width="240">
+      <br><b>Mobile</b> (390 px wide)
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="docs/screenshots/07-api-docs.png" alt="Swagger UI listing the health, auth, leads and discussions endpoints, with lock icons on the protected ones">
+      <br><b>API docs</b> (Swagger UI at <code>/docs</code>): the lock icon marks endpoints that need a Bearer token
+    </td>
+  </tr>
+</table>
 
 ---
 
@@ -49,7 +83,7 @@ Screenshots live in [`docs/screenshots/`](docs/screenshots/).
 - [x] Consistent JSON errors with field-level messages, shown inline under form fields
 - [x] Tests: 82 backend (pytest) and 165 frontend (Vitest)
 - [x] GitHub Actions CI for both apps
-- [x] Deployment-ready: Render Blueprint, cold-start friendly frontend (retries + "waking up" notice), and a daily demo reset
+- [x] Deployed on Vercel + Render + Neon ([live demo](https://lead-floow.vercel.app)), with a Render Blueprint, a cold-start friendly frontend (retries + "waking up" notice) and a daily demo reset
 
 ## Tech stack
 
@@ -72,7 +106,7 @@ Screenshots live in [`docs/screenshots/`](docs/screenshots/).
 **Prerequisites:** Docker with Compose v2 (Docker Desktop is fine), and free ports 3000, 8000 and 5433.
 
 ```bash
-git clone <repository-url> LeadFlow
+git clone https://github.com/jaicod11/leadflow.git LeadFlow
 cd LeadFlow
 docker compose up --build -d
 docker compose ps        # wait until db, api and web are "healthy"
@@ -98,7 +132,7 @@ docker compose down -v                                   # stop and delete all d
 
 ## Local development (without Docker for the apps)
 
-**Prerequisites:** Python 3.11+, Node.js 22.12+ (Next.js alone needs 20.9+, but Vitest 5 needs 22.12+), and Docker for Postgres only.
+**Prerequisites:** Python 3.11+ (CI and Docker use 3.13), Node.js 22.12+ (Next.js alone needs 20.9+, but Vitest 5 needs 22.12+), and Docker for Postgres only.
 
 **Database**
 
@@ -199,7 +233,7 @@ LeadFlow/
 ├── backend/
 │   ├── app/
 │   │   ├── api/routes/      # thin FastAPI routers: health, auth, leads, discussions, demo
-│   │   ├── core/            # settings, exceptions + handlers, 500 middleware
+│   │   ├── core/            # settings, exceptions + handlers, 500 middleware, password hashing + JWT
 │   │   ├── db/              # declarative base, engine/session
 │   │   ├── models/          # User, Lead, Discussion (SQLAlchemy)
 │   │   ├── schemas/         # Pydantic request/response models
@@ -215,21 +249,23 @@ LeadFlow/
 │   │   ├── app/             # layout, providers, pages: / (leads), /login, /register
 │   │   ├── components/      # auth (provider, route guard, forms, user menu), lead list, dialogs, shadcn/ui
 │   │   ├── hooks/           # React Query and UI hooks
-│   │   └── lib/             # API client, types, pure date/grouping/form logic (+ Vitest tests)
+│   │   ├── lib/             # API client, auth helpers, types, pure date/grouping/form logic (+ Vitest tests)
+│   │   └── test/            # test-only factories
 │   └── Dockerfile
-├── docs/screenshots/
+├── docs/screenshots/        # README images
 ├── .github/workflows/
 │   ├── ci.yml               # tests, lint, types, build on every push/PR
 │   └── reset-demo.yml       # daily demo-data reset (09:00 IST)
 ├── docker-compose.yml
 ├── render.yaml              # Render Blueprint for the API
 ├── .env.example
+├── .claude/settings.json    # blocks git write commands for the AI agent (see AI usage)
 └── CLAUDE.md                # rules the AI coding agent followed (see AI usage)
 ```
 
 ## API reference
 
-Interactive docs: **http://localhost:8000/docs**. All routes are under `/api`. Datetimes are UTC ISO 8601 with an offset, e.g. `2026-10-14T10:00:00+00:00`, and request datetimes must include an offset.
+Interactive docs: **http://localhost:8000/docs** locally, or **https://leadflow-api-wkhz.onrender.com/docs** live. All routes are under `/api`. Datetimes are UTC ISO 8601 with an offset, e.g. `2026-10-14T10:00:00+00:00`, and request datetimes must include an offset.
 
 🔒 = requires `Authorization: Bearer <access_token>` (see [Authentication](#authentication)). In `/docs`, call `POST /api/auth/login`, then paste the `access_token` into **Authorize**.
 
@@ -337,6 +373,8 @@ This project was built with AI assistance:
 
 **Architecture:** Browser → **Vercel** (Next.js) → **Render** (FastAPI in Docker, free plan) → **Neon** (Postgres).
 
+**Live:** the frontend is at **https://lead-floow.vercel.app** and the API at **https://leadflow-api-wkhz.onrender.com** (docs at [`/docs`](https://leadflow-api-wkhz.onrender.com/docs)). The steps below are how it was set up; replace the URLs with your own when deploying a copy.
+
 The repo is deployment-ready:
 - [`render.yaml`](render.yaml) is the Render Blueprint.
 - The API container migrates the database (and seeds it if empty) on start-up.
@@ -365,7 +403,7 @@ You don't need to create tables. The API runs `alembic upgrade head` every time 
    | `JWT_SECRET` | another, different `openssl rand -hex 32` value. It signs the login tokens; changing it logs everyone out |
 
    `SEED_ON_STARTUP=true` and `SEED_TIMEZONE=Asia/Kolkata` come from `render.yaml`, and Render injects `PORT`.
-3. After the first deploy, open `https://<your-service>.onrender.com/api/health`. It should return `{"status":"ok","database":"ok"}`. The first start seeds the demo data.
+3. After the first deploy, open `https://<your-service>.onrender.com/api/health` (live: https://leadflow-api-wkhz.onrender.com/api/health). It should return `{"status":"ok","database":"ok"}`. The first start seeds the demo data and creates the demo account.
 
 ### 3. Vercel (frontend)
 
@@ -375,14 +413,14 @@ You don't need to create tables. The API runs `alembic upgrade head` every time 
 
    | Variable | Value |
    | --- | --- |
-   | `NEXT_PUBLIC_API_URL` | `https://<your-service>.onrender.com/api` |
+   | `NEXT_PUBLIC_API_URL` | `https://<your-service>.onrender.com/api` (live: `https://leadflow-api-wkhz.onrender.com/api`) |
    | `NEXT_PUBLIC_DEMO_MODE` | `true` (shows the "data resets daily" footer) |
 
-4. Deploy and note the URL, e.g. `https://leadflow.vercel.app`.
+4. Deploy and note the URL (live: `https://lead-floow.vercel.app`).
 
 ### 4. Allow the Vercel URL on Render
 
-In Render, go to **leadflow-api → Environment** and set `CORS_ORIGINS` to your Vercel URL, e.g. `https://leadflow.vercel.app`. Separate several origins with commas; a trailing slash is ignored. Saving redeploys the API.
+In Render, go to **leadflow-api → Environment** and set `CORS_ORIGINS` to your Vercel URL (live: `https://lead-floow.vercel.app`). Separate several origins with commas; a trailing slash is ignored. Saving redeploys the API.
 
 Vercel preview deployments have their own URLs, so they are blocked unless you add them too.
 
@@ -392,7 +430,7 @@ In the GitHub repo, go to **Settings → Secrets and variables → Actions → N
 
 | Secret | Value |
 | --- | --- |
-| `DEMO_API_URL` | `https://<your-service>.onrender.com/api` |
+| `DEMO_API_URL` | `https://<your-service>.onrender.com/api` (live: `https://leadflow-api-wkhz.onrender.com/api`) |
 | `DEMO_RESET_TOKEN` | the same value as on Render |
 
 Then open **Actions → Reset demo data → Run workflow** once to test it. Without these secrets the workflow skips with a notice instead of failing.
