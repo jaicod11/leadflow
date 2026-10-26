@@ -20,3 +20,7 @@ out/
 # IDE
 .vscode/
 .idea/
+
+# AI assistant files
+CLAUDE.md
+.claude/
